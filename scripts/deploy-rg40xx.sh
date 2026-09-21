@@ -13,7 +13,11 @@ trap 'rm -rf "$TMP"' EXIT
 unzip -q "$ZIP" -d "$TMP"
 
 ssh "${USER}@${HOST}" "mkdir -p '$REMOTE/sternenfuchs'"
-rsync -av --delete \
+# /userdata on KNULLI is a fuseblk mount with fixed ownership (user_id=0,
+# group_id=0, default_permissions); rsync's -a tries to chown/chgrp and
+# fails there even as root, aborting under set -euo pipefail. Preserve
+# perms/times but skip owner/group preservation on this target.
+rsync -rlptD -v --delete \
   --exclude='*.sfc' --exclude='*.smc' --exclude='Starfox-Assets.BIN' \
   "$TMP/sternenfuchs/" "${USER}@${HOST}:$REMOTE/sternenfuchs/"
 scp "$TMP/Sternenfuchs.sh" "${USER}@${HOST}:$REMOTE/Sternenfuchs.sh"
