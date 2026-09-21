@@ -61,7 +61,11 @@ fi
 
 $ESUDO chmod +x "$BIN"
 
-$GPTOKEYB "starfox_pc.${DEVICE_ARCH}" -c "$controlfolder/gamecontrollerdb.txt" >/dev/null 2>&1 &
+# Same missing-mapping issue as SDL_GAMECONTROLLERCONFIG above:
+# $controlfolder/gamecontrollerdb.txt has no entry for this device's GUID,
+# so gptokeyb wouldn't recognize select/start either, breaking its built-in
+# "-1 <app>" select+start exit-kill switch. Point it at the CFW's own db.
+$GPTOKEYB "starfox_pc.${DEVICE_ARCH}" -c "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" >/dev/null 2>&1 &
 
 pm_platform_helper "$BIN"
 "$BIN"
