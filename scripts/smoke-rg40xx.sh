@@ -37,21 +37,34 @@ export LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PAT
 export SDL3SHIM_SDL2_LIB="${SDL3SHIM_SDL2_LIB:-libSDL2-2.0.so.0}"
 [ -n "$ROM" ] && export STARFOX_RETAIL_ROM="$GAMEDIR/${ROM#./}"
 
-# Diagnostic run only: force dummy device backends so SSH does not have to own
-# the handheld display. A successful exit proves ARM64/link/assets/runtime bring-up.
-export SDL3SHIM_SDL2_VIDEODRIVER=dummy
+# This device's SDL2 build has no "dummy" video driver (only "mali", "x11",
+# "windows" are compiled in), so a diagnostic run cannot stay off-screen: it
+# must own the real display via the "mali" driver. EmulationStation is still
+# rendering in the foreground over SSH, so pause it for the duration and
+# always resume it, even on failure/timeout.
+ES_PID="$(pgrep -x emulationstation | head -1)"
+resume_es() { [ -n "$ES_PID" ] && kill -CONT "$ES_PID" 2>/dev/null || true; }
+trap resume_es EXIT
+[ -n "$ES_PID" ] && kill -STOP "$ES_PID" 2>/dev/null || true
+
+export SDL3SHIM_SDL2_VIDEODRIVER=mali
 export SDL3SHIM_SDL2_AUDIODRIVER=dummy
 export SDL_VIDEODRIVER=sdl2
 export SDL_AUDIODRIVER=sdl2
 export STARFOX_TEST_FRAMES=120
 export STARFOX_TEST_SKIP_PREROLL=1
-export STARFOX_TEST_RENDERER=SOFTWARE
+# The pinned bmdhacks/SDL sdl2-backend shim's window-framebuffer path
+# (SDL2_CreateWindowFramebuffer) is an unconditional stub that always
+# returns unsupported -- the CPU "software" SDL_Renderer can never be
+# created through it. Use the shim's GPU/OpenGLES2 render path instead,
+# which it does implement; scale/resolution/effects stay unchanged.
+export STARFOX_TEST_RENDERER=GPU
 export STARFOX_TEST_RENDER_SCALE=1
 export STARFOX_TEST_PRESENTATION_FPS=60
 export STARFOX_TEST_VSYNC=0
 export STARFOX_TRACE_FPS=1
 
-./starfox_pc.aarch64 > smoke.log 2>&1
+timeout 30 ./starfox_pc.aarch64 > smoke.log 2>&1
 rc=$?
 cat smoke.log
 exit $rc
