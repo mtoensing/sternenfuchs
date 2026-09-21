@@ -30,7 +30,12 @@ jobs:
 
       - name: Build
         env:
-          STARFOX_PGO_PHASE: ${{ inputs.pgo_phase || 'none' }}
+          # Leave unset for ordinary push builds so build-arm64.sh
+          # auto-detects (uses the committed PGO profile if present).
+          # workflow_dispatch always passes an explicit choice (its own
+          # default is "none"), for generate/use profiling runs or to
+          # deliberately opt out.
+          STARFOX_PGO_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.pgo_phase || '' }}
         run: ./scripts/build-arm64.sh
 
       - uses: actions/upload-artifact@v4
