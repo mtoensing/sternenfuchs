@@ -12,6 +12,38 @@ SPIRV="$WORK/SPIRV-Cross"
 BUILD="$WORK/starfox-build"
 DIST="$ROOT/dist"
 
+# Profile-guided optimization: STARFOX_PGO_PHASE=generate builds an
+# instrumented binary meant to be run through a representative session
+# (on real hardware, since this is a GUI/GPU app) to collect branch/hot-path
+# data; STARFOX_PGO_PHASE=use rebuilds using previously collected data from
+# PGO_DATA_DIR. A fixed, repo-relative path keeps it stable across the two
+# separate CI runs this requires. Default (unset/"none") behaves exactly as
+# before -- no PGO.
+STARFOX_PGO_PHASE="${STARFOX_PGO_PHASE:-none}"
+PGO_DATA_DIR="$ROOT/pgo-data"
+PGO_CXX_FLAGS=""
+PGO_LINKER_FLAGS=""
+PGO_LTO="ON"
+case "$STARFOX_PGO_PHASE" in
+  generate)
+    mkdir -p "$PGO_DATA_DIR"
+    PGO_CXX_FLAGS="-fprofile-generate=$PGO_DATA_DIR -fprofile-update=atomic"
+    PGO_LINKER_FLAGS="-fprofile-generate=$PGO_DATA_DIR"
+    # LTO's cross-TU inlining changes which call sites even exist, which
+    # fights with per-callsite instrumentation counters -- profile with a
+    # non-LTO build, then apply LTO only in the final "use" build.
+    PGO_LTO="OFF"
+    ;;
+  use)
+    test -d "$PGO_DATA_DIR" || { echo "PGO_DATA_DIR ($PGO_DATA_DIR) missing for STARFOX_PGO_PHASE=use"; exit 1; }
+    test -n "$(find "$PGO_DATA_DIR" -name '*.gcda' -print -quit)" || { echo "No .gcda profile data in $PGO_DATA_DIR"; exit 1; }
+    PGO_CXX_FLAGS="-fprofile-use=$PGO_DATA_DIR -fprofile-correction -Wno-error=coverage-mismatch -Wno-missing-profile"
+    PGO_LINKER_FLAGS="-fprofile-use=$PGO_DATA_DIR"
+    ;;
+  none) ;;
+  *) echo "Unknown STARFOX_PGO_PHASE: $STARFOX_PGO_PHASE"; exit 1 ;;
+esac
+
 rm -rf "$WORK" "$DIST"
 mkdir -p "$PREFIX" "$DIST/sternenfuchs/libs.aarch64"
 
@@ -56,9 +88,10 @@ git -C "$SRC" apply "$ROOT/patches/0001-system-sdl3.patch"
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
-  -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53" \
-  -DCMAKE_C_FLAGS="-mcpu=cortex-a53" \
-  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+  -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53 $PGO_CXX_FLAGS" \
+  -DCMAKE_C_FLAGS="-mcpu=cortex-a53 $PGO_CXX_FLAGS" \
+  -DCMAKE_EXE_LINKER_FLAGS="$PGO_LINKER_FLAGS" \
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION="$PGO_LTO" \
   -DSTARFOX_USE_SYSTEM_SDL3=ON \
   -DSTARFOX_BUILD_RUNTIME=ON \
   -DSTARFOX_BUILD_TESTS=OFF \

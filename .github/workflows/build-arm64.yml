@@ -2,6 +2,12 @@ name: build-arm64
 
 on:
   workflow_dispatch:
+    inputs:
+      pgo_phase:
+        description: "Profile-guided optimization phase"
+        type: choice
+        options: [none, generate, use]
+        default: none
   push:
     branches:
       - prototype/rg40xx
@@ -23,6 +29,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build
+        env:
+          STARFOX_PGO_PHASE: ${{ inputs.pgo_phase || 'none' }}
         run: ./scripts/build-arm64.sh
 
       - uses: actions/upload-artifact@v4
