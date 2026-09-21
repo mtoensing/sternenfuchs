@@ -22,7 +22,17 @@ BIN="$GAMEDIR/starfox_pc.${DEVICE_ARCH}"
 cd "$GAMEDIR"
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
-export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
+# control.txt's get_controls() only ever greps ONE hardcoded GUID (an
+# unrelated Xbox 360 pad, 030000005e0400008e...) out of the CFW's mapping db
+# into $SDL_GAMECONTROLLERCONFIG_FILE ("# TODO: figure out SDL_GAMECONTROLLERCONFIG"
+# in control.txt), so that file never actually contains this device's own
+# mapping, and SDL_GAMECONTROLLERCONFIG ends up holding that unrelated single
+# line too. Real SDL2 then never recognizes the RG40XX-H pad as a gamepad
+# (SDL_IsGamepad false), so no gamepad-level input reaches the app. Pull this
+# device's own mapping directly out of the CFW's base gamecontrollerdb.txt.
+RG40XX_H_GUID="19000000010000000100000000010000"
+rg40xx_mapping="$(grep "^${RG40XX_H_GUID}," "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" 2>/dev/null | head -1)"
+export SDL_GAMECONTROLLERCONFIG="${rg40xx_mapping:-$sdl_controllerconfig}"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # SDL3 shim -> CFW's patched SDL2.
