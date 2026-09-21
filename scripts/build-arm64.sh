@@ -13,7 +13,7 @@ BUILD="$WORK/starfox-build"
 DIST="$ROOT/dist"
 
 rm -rf "$WORK" "$DIST"
-mkdir -p "$PREFIX" "$DIST/sternenfuchs/libs.aarch64" "$DIST/sternenfuchs/licenses"
+mkdir -p "$PREFIX" "$DIST/sternenfuchs/libs.aarch64"
 
 git clone "$STARFOX_REPO" "$SRC"
 git -C "$SRC" checkout "$STARFOX_COMMIT"
@@ -77,19 +77,19 @@ cp "$ROOT/portmaster/sternenfuchs/Sternenfuchs.sh" "$DIST/Sternenfuchs.sh"
 cp "$ROOT/portmaster/sternenfuchs/port.json" "$DIST/port.json"
 cp "$ROOT/portmaster/sternenfuchs/README.md" "$DIST/README.md"
 cp "$ROOT/portmaster/sternenfuchs/gameinfo.xml" "$DIST/gameinfo.xml"
+cp "$ROOT/portmaster/sternenfuchs/screenshot.jpg" "$DIST/screenshot.jpg"
+cp "$ROOT/portmaster/sternenfuchs/cover.jpg" "$DIST/cover.jpg"
+# gameinfo.xml's <image> references this path -- keep a copy here so it
+# resolves correctly once installed, not just at the zip's top level.
+cp "$ROOT/portmaster/sternenfuchs/screenshot.jpg" "$DIST/sternenfuchs/screenshot.jpg"
 cp "$ROOT/portmaster/sternenfuchs/prototype-pregame.cfg" "$DIST/sternenfuchs/prototype-pregame.cfg"
-
-cat > "$DIST/sternenfuchs/licenses/LICENSE.sdl.txt" <<'EOF'
-Bundled libSDL3.so.0 is built from bmdhacks/SDL's sdl2-backend fork.
-SDL is distributed under the zlib license:
-https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt
-EOF
+cp -r "$ROOT/portmaster/sternenfuchs/licenses" "$DIST/sternenfuchs/licenses"
 
 file "$DIST/sternenfuchs/starfox_pc.aarch64"
 readelf -d "$DIST/sternenfuchs/starfox_pc.aarch64" | grep NEEDED || true
 
 (
   cd "$DIST"
-  zip -qr sternenfuchs.zip Sternenfuchs.sh port.json README.md gameinfo.xml sternenfuchs
+  zip -qr sternenfuchs.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.jpg cover.jpg sternenfuchs
 )
 echo "Created: $DIST/sternenfuchs.zip"

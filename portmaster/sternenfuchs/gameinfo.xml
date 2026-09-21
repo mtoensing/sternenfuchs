@@ -3,7 +3,10 @@
   <game>
     <path>./Sternenfuchs.sh</path>
     <name>Sternenfuchs</name>
-    <desc>ARM64 PortMaster prototype for Star Fox Enhanced.</desc>
+    <desc>ARM64/PortMaster packaging of the open-source Star Fox Enhanced runtime, a fan-made SNES Star Fox/Starwing enhancement. Requires your own legally obtained ROM.</desc>
     <genre>Action</genre>
+    <developer>Argonaut Software, Team SFEX, kandowontu</developer>
+    <publisher>Nintendo (original 1993 game)</publisher>
+    <image>./sternenfuchs/screenshot.jpg</image>
   </game>
 </gameList>

@@ -9,9 +9,9 @@
   "attr": {
     "title": "Sternenfuchs",
     "porter": ["mtoensing"],
-    "desc": "Prototype ARM64 PortMaster packaging for Star Fox Enhanced.",
+    "desc": "ARM64/PortMaster packaging of the open-source Star Fox Enhanced runtime, a fan-made SNES Star Fox/Starwing enhancement. No Nintendo ROM or ROM-derived data is included.",
     "desc_md": null,
-    "inst": "Copy a supported legally obtained Star Fox/Starwing .sfc or .smc ROM into ports/sternenfuchs/. It is validated locally and is never distributed with this port.",
+    "inst": "This package does not include any Nintendo ROM data. Copy your own legally obtained Star Fox/Starwing `.sfc` or `.smc` ROM into `sternenfuchs/` before launching. The runtime validates it and builds a local `Starfox-Assets.BIN` on first run; it is never distributed with this port and never leaves the device.\n\nCurrently aarch64 (H700/Cortex-A53 class) only, tested on an Anbernic RG40XX H running KNULLI at 640x480. Renders through the device's OpenGL ES (the software/CPU renderer path is not usable through the bundled SDL3-to-SDL2 shim). Performance is CPU-bound single-core SNES CPU+PPU emulation; expect roughly 30-45 FPS in flight on this reference hardware rather than a locked 60.",
     "inst_md": null,
     "genres": ["action"],
     "image": null,
