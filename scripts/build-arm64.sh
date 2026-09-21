@@ -42,9 +42,17 @@ cmake --install "$SDL/build"
 
 git -C "$SRC" apply "$ROOT/patches/0001-system-sdl3.patch"
 
+# The RG40XX H (H700) is a quad-core Cortex-A53 @ 1.5GHz; real-device
+# testing showed the game pegging a single core at 100% while the other
+# three sit idle, so this is a straightforward codegen/scheduling target
+# worth setting explicitly -- the SDL shim already got -march=armv8-a,
+# but the actual game binary previously built with no ARM-specific flags
+# at all.
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
+  -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53" \
+  -DCMAKE_C_FLAGS="-mcpu=cortex-a53" \
   -DSTARFOX_USE_SYSTEM_SDL3=ON \
   -DSTARFOX_BUILD_RUNTIME=ON \
   -DSTARFOX_BUILD_TESTS=OFF \
