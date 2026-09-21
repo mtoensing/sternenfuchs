@@ -1,0 +1,6 @@
+.work/
+dist/
+device-logs/
+*.sfc
+*.smc
+Starfox-Assets.BIN

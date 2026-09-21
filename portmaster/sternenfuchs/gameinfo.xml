@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./Sternenfuchs.sh</path>
+    <name>Sternenfuchs</name>
+    <desc>ARM64 PortMaster prototype for Star Fox Enhanced.</desc>
+    <genre>Action</genre>
+  </game>
+</gameList>

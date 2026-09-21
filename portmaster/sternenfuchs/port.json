@@ -1,0 +1,27 @@
+{
+  "version": 4,
+  "name": "sternenfuchs.zip",
+  "items": [
+    "Sternenfuchs.sh",
+    "sternenfuchs/"
+  ],
+  "items_opt": [],
+  "attr": {
+    "title": "Sternenfuchs",
+    "porter": ["mtoensing"],
+    "desc": "Prototype ARM64 PortMaster packaging for Star Fox Enhanced.",
+    "desc_md": null,
+    "inst": "Copy a supported legally obtained Star Fox/Starwing .sfc or .smc ROM into ports/sternenfuchs/. It is validated locally and is never distributed with this port.",
+    "inst_md": null,
+    "genres": ["action"],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": [],
+    "store": [],
+    "availability": "paid",
+    "reqs": [],
+    "arch": ["aarch64"],
+    "min_glibc": "2.35"
+  }
+}

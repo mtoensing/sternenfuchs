@@ -1,0 +1,12 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@
+ option(STARFOX_BUILD_RUNTIME "Build the SDL3 native PC runtime" ON)
++option(STARFOX_USE_SYSTEM_SDL3 "Use an installed SDL3 package instead of fetching SDL3" OFF)
+@@
+ if(STARFOX_BUILD_RUNTIME)
++    if(STARFOX_USE_SYSTEM_SDL3 AND NOT TARGET SDL3::SDL3)
++        find_package(SDL3 REQUIRED CONFIG)
++    endif()
+     if(ANDROID AND NOT TARGET SDL3::SDL3)

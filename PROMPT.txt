@@ -1,0 +1,32 @@
+Use the supplied sternenfuchs bootstrap as-is.
+
+Create/use GitHub repo `mtoensing/sternenfuchs`.
+Work on branch `prototype/rg40xx`.
+
+Target device:
+- Anbernic RG40XX H
+- KNULLI
+- aarch64 / H700 / 1 GB / 640x480
+- SSH: root@192.168.178.76
+- KNULLI default password: linux
+  If it fails: System Settings -> Security -> Root password
+- Persistent storage: /userdata
+
+Do not redo broad research. Read AGENT_TASK.md and SOURCES.md only when needed.
+
+Make the supplied ARM64 GitHub Actions build pass, deploy to the device, run the
+supplied smoke test, fetch logs, and fix only actual build/runtime blockers.
+
+Prototype priorities:
+1. boot
+2. menu
+3. controller
+4. audio
+5. one playable level
+6. stable 60 FPS software presentation; use 30 FPS if required
+
+Do not start with Vulkan, WestonPack, refactoring, or a PortMaster PR.
+Do not commit ROMs or Starfox-Assets.BIN.
+
+Keep status replies to:
+Build / Deploy / Device / Changed / Next.
