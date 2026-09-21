@@ -48,11 +48,17 @@ git -C "$SRC" apply "$ROOT/patches/0001-system-sdl3.patch"
 # worth setting explicitly -- the SDL shim already got -march=armv8-a,
 # but the actual game binary previously built with no ARM-specific flags
 # at all.
+# CMAKE_INTERPROCEDURAL_OPTIMIZATION (LTO) is the portable/CMake-correct
+# way to get whole-program optimization across the many small TUs and
+# static libs this project links into starfox_pc -- it handles compiler
+# + linker + archiver flag propagation, which hand-adding -flto to
+# CMAKE_CXX_FLAGS alone doesn't reliably do for static-library targets.
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="$PREFIX" \
   -DCMAKE_CXX_FLAGS="-mcpu=cortex-a53" \
   -DCMAKE_C_FLAGS="-mcpu=cortex-a53" \
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
   -DSTARFOX_USE_SYSTEM_SDL3=ON \
   -DSTARFOX_BUILD_RUNTIME=ON \
   -DSTARFOX_BUILD_TESTS=OFF \
