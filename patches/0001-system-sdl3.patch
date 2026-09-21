@@ -1,12 +1,21 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@
+@@ -36,6 +36,7 @@
+ 
+ option(STARFOX_BUILD_TESTS "Build deterministic timing tests" ON)
  option(STARFOX_BUILD_RUNTIME "Build the SDL3 native PC runtime" ON)
 +option(STARFOX_USE_SYSTEM_SDL3 "Use an installed SDL3 package instead of fetching SDL3" OFF)
-@@
+ option(STARFOX_BUILD_VR "Build the OpenXR VR integration and runtime diagnostic" OFF)
+ option(STARFOX_BUILD_TOOLS "Build host-side trace and asset tools"
+     ${STARFOX_BUILD_TOOLS_DEFAULT})
+@@ -348,6 +349,9 @@
+ endif()
+ 
  if(STARFOX_BUILD_RUNTIME)
 +    if(STARFOX_USE_SYSTEM_SDL3 AND NOT TARGET SDL3::SDL3)
 +        find_package(SDL3 REQUIRED CONFIG)
 +    endif()
      if(ANDROID AND NOT TARGET SDL3::SDL3)
+         # The Android application consumes SDL's official AAR. Its Prefab
+         # package supplies both headers and libSDL3.so to this CMake build.
