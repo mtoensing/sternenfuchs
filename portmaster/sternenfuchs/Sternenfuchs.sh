@@ -25,13 +25,16 @@ cd "$GAMEDIR"
 # control.txt's get_controls() only ever greps ONE hardcoded GUID (an
 # unrelated Xbox 360 pad, 030000005e0400008e...) out of the CFW's mapping db
 # into $SDL_GAMECONTROLLERCONFIG_FILE ("# TODO: figure out SDL_GAMECONTROLLERCONFIG"
-# in control.txt), so that file never actually contains this device's own
-# mapping, and SDL_GAMECONTROLLERCONFIG ends up holding that unrelated single
-# line too. Real SDL2 then never recognizes the RG40XX-H pad as a gamepad
-# (SDL_IsGamepad false), so no gamepad-level input reaches the app. Pull this
-# device's own mapping directly out of the CFW's base gamecontrollerdb.txt.
+# in control.txt), so that file (/tmp/gamecontrollerdb.txt) never actually
+# contains this device's own mapping, and the derived SDL_GAMECONTROLLERCONFIG
+# ends up holding that unrelated single line too. Neither the game nor
+# gptokeyb (which also inherits SDL_GAMECONTROLLERCONFIG_FILE, and needs it
+# to recognize select/start for its own "-1 <app>" exit-kill switch) can
+# then see this device as a real gamepad (SDL_IsGamepad/IsGameController
+# false). Point both at the CFW's own, complete gamecontrollerdb.txt instead.
+export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/${CFW_NAME}/gamecontrollerdb.txt"
 RG40XX_H_GUID="19000000010000000100000000010000"
-rg40xx_mapping="$(grep "^${RG40XX_H_GUID}," "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" 2>/dev/null | head -1)"
+rg40xx_mapping="$(grep "^${RG40XX_H_GUID}," "$SDL_GAMECONTROLLERCONFIG_FILE" 2>/dev/null | head -1)"
 export SDL_GAMECONTROLLERCONFIG="${rg40xx_mapping:-$sdl_controllerconfig}"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
@@ -61,11 +64,16 @@ fi
 
 $ESUDO chmod +x "$BIN"
 
-# Same missing-mapping issue as SDL_GAMECONTROLLERCONFIG above:
-# $controlfolder/gamecontrollerdb.txt has no entry for this device's GUID,
-# so gptokeyb wouldn't recognize select/start either, breaking its built-in
-# "-1 <app>" select+start exit-kill switch. Point it at the CFW's own db.
-$GPTOKEYB "starfox_pc.${DEVICE_ARCH}" -c "$controlfolder/${CFW_NAME}/gamecontrollerdb.txt" >/dev/null 2>&1 &
+# gptokeyb's -c flag takes a *.gptk keymap file ("key = value" lines, for
+# custom gamepad->keyboard key remapping) -- not a gamecontrollerdb.txt
+# (comma-separated GUID database). The original bootstrap passed the
+# latter, which gptokeyb's fscanf-based .gptk parser can't read at all
+# (spammed "fscanf(): Invalid argument" on every line). We don't need
+# custom keyboard remapping -- the game reads the gamepad natively via
+# SDL -- so just drop it; gptokeyb's default mappings plus its built-in
+# "-1 <app>" select+start exit-kill switch (which reads SDL_GAMECONTROLLERCONFIG_FILE
+# above, not -c) don't need it.
+$GPTOKEYB "starfox_pc.${DEVICE_ARCH}" >/dev/null 2>&1 &
 
 pm_platform_helper "$BIN"
 "$BIN"
