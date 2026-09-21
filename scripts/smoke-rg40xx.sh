@@ -42,7 +42,7 @@ export SDL3SHIM_SDL2_LIB="${SDL3SHIM_SDL2_LIB:-libSDL2-2.0.so.0}"
 # must own the real display via the "mali" driver. EmulationStation is still
 # rendering in the foreground over SSH, so pause it for the duration and
 # always resume it, even on failure/timeout.
-ES_PID="$(pgrep -x emulationstation | head -1)"
+ES_PID="$(pgrep -f 'exit-on-reboot-required' | head -1)"
 resume_es() { [ -n "$ES_PID" ] && kill -CONT "$ES_PID" 2>/dev/null || true; }
 trap resume_es EXIT
 [ -n "$ES_PID" ] && kill -STOP "$ES_PID" 2>/dev/null || true
