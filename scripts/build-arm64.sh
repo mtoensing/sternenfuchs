@@ -77,11 +77,11 @@ cp "$ROOT/portmaster/sternenfuchs/Sternenfuchs.sh" "$DIST/Sternenfuchs.sh"
 cp "$ROOT/portmaster/sternenfuchs/port.json" "$DIST/port.json"
 cp "$ROOT/portmaster/sternenfuchs/README.md" "$DIST/README.md"
 cp "$ROOT/portmaster/sternenfuchs/gameinfo.xml" "$DIST/gameinfo.xml"
-cp "$ROOT/portmaster/sternenfuchs/screenshot.jpg" "$DIST/screenshot.jpg"
-cp "$ROOT/portmaster/sternenfuchs/cover.jpg" "$DIST/cover.jpg"
+cp "$ROOT/portmaster/sternenfuchs/screenshot.png" "$DIST/screenshot.png"
+cp "$ROOT/portmaster/sternenfuchs/cover.png" "$DIST/cover.png"
 # gameinfo.xml's <image> references this path -- keep a copy here so it
 # resolves correctly once installed, not just at the zip's top level.
-cp "$ROOT/portmaster/sternenfuchs/screenshot.jpg" "$DIST/sternenfuchs/screenshot.jpg"
+cp "$ROOT/portmaster/sternenfuchs/screenshot.png" "$DIST/sternenfuchs/screenshot.png"
 cp "$ROOT/portmaster/sternenfuchs/prototype-pregame.cfg" "$DIST/sternenfuchs/prototype-pregame.cfg"
 cp -r "$ROOT/portmaster/sternenfuchs/licenses" "$DIST/sternenfuchs/licenses"
 
@@ -90,6 +90,6 @@ readelf -d "$DIST/sternenfuchs/starfox_pc.aarch64" | grep NEEDED || true
 
 (
   cd "$DIST"
-  zip -qr sternenfuchs.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.jpg cover.jpg sternenfuchs
+  zip -qr sternenfuchs.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.png cover.png sternenfuchs
 )
 echo "Created: $DIST/sternenfuchs.zip"
