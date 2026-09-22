@@ -23,7 +23,7 @@ Prototype priorities:
 3. controller
 4. audio
 5. one playable level
-6. stable 60 FPS software presentation; use 30 FPS if required
+6. stable 60 FPS presentation (GLES-backed, see KNOWN_BLOCKERS.md)
 
 Do not start with Vulkan, WestonPack, refactoring, or a PortMaster PR.
 Do not commit ROMs or Starfox-Assets.BIN.

@@ -50,8 +50,15 @@ Pinned revisions are in `scripts/versions.sh`. Do not update them during bring-u
 
 - Use a native ARM64 GitHub runner with an Ubuntu 22.04 container to avoid an
   unnecessarily new glibc baseline.
-- Start at 640x480, 4:3, software renderer, render scale 1x, 60 FPS presentation,
-  expensive effects off.
+- Runtime architecture: native ARM64 `starfox_pc` using the SDL3 API, through
+  the pinned SDL3->SDL2 compatibility shim, onto the PortMaster/KNULLI
+  patched device SDL2 backend, with GLES/GPU-backed presentation. The game
+  rasterizes its frame on the CPU and uploads it as a texture; it is not a
+  pure software-renderer path (SDL3's software SDL_Renderer cannot be created
+  through the shim). Vulkan is disabled. See `KNOWN_BLOCKERS.md`.
+- 640x480, 4:3, render scale 1x, 60 FPS presentation target, expensive
+  effects off. Measured FPS below 60 is an intermediate state, not a reason
+  to lower the target.
 - The initial `pregame.cfg` is supplied by this bootstrap.
 - Prefer PortMaster's patched device SDL2 via the pinned `bmdhacks/SDL`
   SDL3-to-SDL2 backend shim.
