@@ -23,10 +23,13 @@ emulation, not GPU-bound, so expect roughly 30-45 FPS in flight on this
 reference hardware rather than a locked 60; presentation and simulation speed
 are decoupled, so game speed itself stays correct regardless.
 
-This has only been tested on the one device above. If you test it on other
-CFWs/hardware, please report back -- see `Technical notes` for a couple of
-device-specific issues this package already had to work around on KNULLI
-that may also affect other CFWs.
+This has only been directly verified on the one device above. **We're looking
+for testers** on ArkOS, AmberELEC, muOS, dArkOS, and ROCKNIX (especially
+across its Panfrost/Libmali/Adreno GPU driver variants) -- please open an
+issue with what you find, working or not. See `Technical notes` for a couple
+of device-specific issues this package already had to work around on KNULLI,
+and for a fallback this port takes if your CFW's default audio device fails
+to open.
 
 ### Controls
 
@@ -53,6 +56,15 @@ targets:
   comment), point it at the CFW's own complete `gamecontrollerdb.txt`
   instead -- this also fixes gptokeyb's own select+start exit-kill switch,
   which depends on the same recognition.
+- A dArkOS tester hit a fatal `SDL_OpenAudioDeviceStream` failure: ALSA's
+  `default` device's `dmix`/`dsnoop` plugin failed to create its IPC
+  semaphore in that CFW's sandbox, and the engine treats a failed audio
+  open as unrecoverable. `Sternenfuchs.sh` now retries once with audio
+  forced off (SDL2's dummy driver) whenever the first launch fails on that
+  specific error, so the port stays playable (without sound) instead of
+  refusing to start. We don't have that hardware to find the actual
+  correct ALSA device string, so this is a fallback, not a real fix --
+  reports of *why* the default device fails on your CFW are welcome.
 
 ### Credits
 
