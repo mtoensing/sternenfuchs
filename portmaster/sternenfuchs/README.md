@@ -18,10 +18,12 @@ Tested on an Anbernic RG40XX H (H700, aarch64) running KNULLI at 640x480,
 4:3, native OpenGL ES rendering (the CPU/software renderer path is not
 reachable through the bundled SDL3-to-SDL2 shim on this device -- see
 `Technical notes` below). Menu, native gamepad input, audio, and gameplay are
-confirmed working. Performance is CPU-bound single-core SNES CPU+PPU
-emulation, not GPU-bound, so expect roughly 30-45 FPS in flight on this
-reference hardware rather than a locked 60; presentation and simulation speed
-are decoupled, so game speed itself stays correct regardless.
+confirmed working. Performance is CPU-bound and effectively single-thread limited on this
+reference hardware. Star Fox Enhanced is a native C++ port with a 65C816
+compatibility bridge and a native translation of the original rendering
+pipeline, not full SNES CPU+PPU emulation. Expect roughly 30-45 FPS in flight
+rather than a locked 60; presentation and simulation speed are decoupled, so
+game speed itself stays correct regardless.
 
 This has only been directly verified on the one device above. **We're looking
 for testers** on ArkOS, AmberELEC, muOS, dArkOS, and ROCKNIX (especially
