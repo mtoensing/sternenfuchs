@@ -77,5 +77,20 @@ $GPTOKEYB "starfox_pc.${DEVICE_ARCH}" >/dev/null 2>&1 &
 
 pm_platform_helper "$BIN"
 "$BIN"
+STATUS=$?
+
+# Some CFWs' default ALSA route (the "default" device's dmix/dsnoop plugin)
+# fails to open in their sandbox -- e.g. "unable to create IPC semaphore"
+# followed by SDL_OpenAudioDeviceStream failing -- which the engine treats
+# as fatal and exits before any menu is shown. Rather than guess a
+# per-CFW ALSA device string we can't verify without that hardware, retry
+# once with audio forced off (SDL2's dummy driver) so the port is at least
+# playable instead of refusing to start.
+if [ "$STATUS" -ne 0 ] && grep -q "SDL_OpenAudioDeviceStream" "$GAMEDIR/log.txt" 2>/dev/null; then
+  echo "Audio device failed to open; retrying with audio disabled." >&2
+  export SDL3SHIM_SDL2_AUDIODRIVER=dummy
+  export SDL_AUDIODRIVER=sdl2
+  "$BIN"
+fi
 
 pm_finish
