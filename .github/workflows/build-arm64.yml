@@ -43,3 +43,9 @@ jobs:
           name: sternenfuchs-aarch64
           path: dist/sternenfuchs.zip
           retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sternenfuchs-aarch64-pr-layout
+          path: dist/sternenfuchs-pr.zip
+          retention-days: 7

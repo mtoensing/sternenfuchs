@@ -133,8 +133,19 @@ cp -r "$ROOT/portmaster/sternenfuchs/licenses" "$DIST/sternenfuchs/licenses"
 file "$DIST/sternenfuchs/starfox_pc.aarch64"
 readelf -d "$DIST/sternenfuchs/starfox_pc.aarch64" | grep NEEDED || true
 
+# Two different consumers need two different layouts:
+# - sternenfuchs.zip: what PortMaster's own auto-install/sideload feature
+#   expects -- just the launcher script and its asset folder at the zip
+#   root, nothing else, since that's literally what ends up in /roms/ports/.
+#   Extra files at the root confuse auto-install (confirmed by a PortMaster
+#   tester: "it only needs the folder and the .sh at the root level").
+# - sternenfuchs-pr.zip: the AGENTS.md PR-submission layout (port.json,
+#   README.md, gameinfo.xml, screenshot/cover) for when this actually goes
+#   to PortsMaster/PortMaster-New -- not for sideloading.
 (
   cd "$DIST"
-  zip -qr sternenfuchs.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.png cover.png sternenfuchs
+  zip -qr sternenfuchs.zip Sternenfuchs.sh sternenfuchs
+  zip -qr sternenfuchs-pr.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.png cover.png sternenfuchs
 )
-echo "Created: $DIST/sternenfuchs.zip"
+echo "Created: $DIST/sternenfuchs.zip (sideload/auto-install layout)"
+echo "Created: $DIST/sternenfuchs-pr.zip (PR-submission layout)"
