@@ -22,8 +22,9 @@ if [ ! -f pregame.cfg ] && [ -f prototype-pregame.cfg ]; then
 fi
 
 ROM=""
-for f in ./*.sfc ./*.smc; do
-  [ -f "$f" ] && ROM="$f" && break
+for f in ./*.sfc ./*.smc ./*.SFC ./*.SMC; do
+  [ -f "$f" ] || continue
+  if sh ./check-rom.sh "$f"; then ROM="$f"; break; fi
 done
 
 if [ ! -f Starfox-Assets.BIN ] && [ -z "$ROM" ]; then

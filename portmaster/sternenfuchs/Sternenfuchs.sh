@@ -53,13 +53,20 @@ if [ ! -f "$GAMEDIR/pregame.cfg" ] && [ -f "$GAMEDIR/prototype-pregame.cfg" ]; t
   cp "$GAMEDIR/prototype-pregame.cfg" "$GAMEDIR/pregame.cfg"
 fi
 
+# Only hand the runtime a ROM whose CRC-32 matches a revision the pinned
+# upstream accepts (check-rom.sh); an unsupported dump is reported and
+# skipped rather than passed through as the first *.sfc/*.smc found.
 if [ ! -f "$GAMEDIR/Starfox-Assets.BIN" ]; then
-  for rom in "$GAMEDIR"/*.sfc "$GAMEDIR"/*.smc; do
-    if [ -f "$rom" ]; then
+  for rom in "$GAMEDIR"/*.sfc "$GAMEDIR"/*.smc "$GAMEDIR"/*.SFC "$GAMEDIR"/*.SMC; do
+    [ -f "$rom" ] || continue
+    if variant="$(sh "$GAMEDIR/check-rom.sh" "$rom")"; then
+      echo "ROM: $variant ($rom)"
       export STARFOX_RETAIL_ROM="$rom"
       break
     fi
+    echo "ROM skipped -- $variant" >&2
   done
+  [ -n "${STARFOX_RETAIL_ROM:-}" ] || echo "No supported Star Fox/Starwing ROM found in $GAMEDIR" >&2
 fi
 
 $ESUDO chmod +x "$BIN"

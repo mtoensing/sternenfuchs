@@ -17,8 +17,12 @@ ssh "${USER}@${HOST}" "mkdir -p '$REMOTE/sternenfuchs'"
 # group_id=0, default_permissions); rsync's -a tries to chown/chgrp and
 # fails there even as root, aborting under set -euo pipefail. Preserve
 # perms/times but skip owner/group preservation on this target.
-rsync -rlptD -v --delete \
-  --exclude='*.sfc' --exclude='*.smc' --exclude='Starfox-Assets.BIN' \
+# No --delete: the runtime keeps its user data next to the binary (its
+# portable data directory is SDL_GetBasePath()) -- pregame.cfg,
+# input-bindings.cfg, hud-layout.cfg, starfox-ex.srm -- alongside the
+# user's ROM, Starfox-Assets.BIN and log.txt. Deploy only adds/overwrites
+# packaged files; it never removes anything from the device.
+rsync -rlptD -v \
   "$TMP/sternenfuchs/" "${USER}@${HOST}:$REMOTE/sternenfuchs/"
 scp "$TMP/Sternenfuchs.sh" "${USER}@${HOST}:$REMOTE/Sternenfuchs.sh"
 echo "Deployed to $HOST:$REMOTE"
