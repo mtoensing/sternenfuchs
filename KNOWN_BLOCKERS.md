@@ -25,6 +25,10 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 - The shim's window-framebuffer path (`SDL2_CreateWindowFramebuffer`) is an
   unconditional stub, so SDL3's CPU "software" SDL_Renderer can never be
   created on this device. Use the GPU/GLES render path.
+  `patches/0002-software-renderer-fallback.patch` makes the engine present a
+  saved/selected "Software" renderer mode through the default (GLES)
+  renderer instead of throwing `SDL_CreateRenderer: That operation is not
+  supported` on every launch.
 - This device's SDL2 has no `dummy` video driver; a diagnostic run over SSH
   must own the real display (`smoke-rg40xx.sh` pauses EmulationStation).
 

@@ -1,0 +1,20 @@
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 0e025e4..affb39d 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -2849,6 +2849,15 @@ private:
+             std::cerr<<"SDL GPU unavailable: "<<SDL_GetError()<<"; using native renderer fallback\n";
+             renderer_=SDL_CreateRenderer(window_,nullptr);
+         }
++        // Some SDL builds (e.g. the SDL3-to-SDL2 shim used on handhelds)
++        // cannot create the CPU "software" renderer. The software mode's
++        // frame is rasterized on the CPU anyway, so present it through the
++        // default renderer instead of failing -- the mode is persisted, so
++        // throwing here would crash on every launch.
++        if(!renderer_ && renderer_driver && std::string_view(renderer_driver)=="software") {
++            std::cerr<<"SDL software renderer unavailable: "<<SDL_GetError()<<"; using default renderer\n";
++            renderer_=SDL_CreateRenderer(window_,nullptr);
++        }
+         if (renderer_ == nullptr) {
+             throw std::runtime_error{
+                 std::string{"SDL_CreateRenderer: "} + SDL_GetError()};

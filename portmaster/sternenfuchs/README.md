@@ -52,6 +52,8 @@ targets:
   (`SDL2_CreateWindowFramebuffer`) is an unconditional stub that always
   returns unsupported, so an SDL3 app's CPU/software `SDL_Renderer` can
   never be created through it -- use the GPU/OpenGLES2 render path instead.
+  This port patches the engine so that choosing the "Software" renderer
+  falls back to the default renderer rather than crashing on every launch.
 - If the CFW's `control.txt`/`get_controls()` only populates
   `SDL_GAMECONTROLLERCONFIG_FILE` with a single unrelated controller's
   mapping (check for a `# TODO: figure out SDL_GAMECONTROLLERCONFIG`-style
