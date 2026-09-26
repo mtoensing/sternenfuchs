@@ -31,8 +31,11 @@ cd "$GAMEDIR"
 # gptokeyb (which also inherits SDL_GAMECONTROLLERCONFIG_FILE, and needs it
 # to recognize select/start for its own "-1 <app>" exit-kill switch) can
 # then see this device as a real gamepad (SDL_IsGamepad/IsGameController
-# false). Point both at the CFW's own, complete gamecontrollerdb.txt instead.
-export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/${CFW_NAME}/gamecontrollerdb.txt"
+# false). Point both at the CFW's own, complete gamecontrollerdb.txt instead
+# -- but only where that file exists, so CFWs without it (e.g. dArkOS on the
+# OGA) keep PortMaster's own setup rather than an empty mapping path.
+cfw_gamecontrollerdb="$controlfolder/${CFW_NAME}/gamecontrollerdb.txt"
+[ -f "$cfw_gamecontrollerdb" ] && export SDL_GAMECONTROLLERCONFIG_FILE="$cfw_gamecontrollerdb"
 RG40XX_H_GUID="19000000010000000100000000010000"
 rg40xx_mapping="$(grep "^${RG40XX_H_GUID}," "$SDL_GAMECONTROLLERCONFIG_FILE" 2>/dev/null | head -1)"
 export SDL_GAMECONTROLLERCONFIG="${rg40xx_mapping:-$sdl_controllerconfig}"

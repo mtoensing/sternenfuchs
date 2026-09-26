@@ -63,7 +63,12 @@ reported by someone else, or not yet reproduced here, is labelled as such.
   (`gamepad=0`), and gptokeyb's Select+Start exit did not work.
 - Fix in `Sternenfuchs.sh`: point `SDL_GAMECONTROLLERCONFIG_FILE` at the
   CFW's complete `$controlfolder/$CFW_NAME/gamecontrollerdb.txt` and export
-  this device's line as `SDL_GAMECONTROLLERCONFIG`.
+  this device's line as `SDL_GAMECONTROLLERCONFIG`. The override applies
+  only when that file exists; otherwise PortMaster's own setup is kept.
+- Reported by a dArkOS tester on the original OGA (not reproduced here):
+  Select+Start did not exit (fine on the RG353V). Suspected cause: the
+  CFW-specific gamecontrollerdb.txt is missing there, which the guard above
+  addresses. Unverified on OGA hardware.
 - RG40XX H GUID: `19000000010000000100000000010000`
   (`Anbernic RG40XX-H Controller`, 4 axes, 17 buttons, 1 hat).
 - Native SDL gamepad input is used. Do not replace analog controls with
