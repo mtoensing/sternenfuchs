@@ -57,18 +57,19 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 
 ## Controller
 
-- PortMaster's `get_controls` on KNULLI only greps one hardcoded, unrelated
-  GUID (an Xbox 360 pad) into `/tmp/gamecontrollerdb.txt`, so neither the
-  game nor gptokeyb recognized the RG40XX H as a gamepad
-  (`gamepad=0`), and gptokeyb's Select+Start exit did not work.
-- Fix in `Sternenfuchs.sh`: point `SDL_GAMECONTROLLERCONFIG_FILE` at the
-  CFW's complete `$controlfolder/$CFW_NAME/gamecontrollerdb.txt` and export
-  this device's line as `SDL_GAMECONTROLLERCONFIG`. The override applies
-  only when that file exists; otherwise PortMaster's own setup is kept.
-- Reported by a dArkOS tester on the original OGA (not reproduced here):
-  Select+Start did not exit (fine on the RG353V). Suspected cause: the
-  CFW-specific gamecontrollerdb.txt is missing there, which the guard above
-  addresses. Unverified on OGA hardware.
+- Controller mapping is left entirely to PortMaster (`get_controls`) and
+  gptokeyb; the launcher does not override `SDL_GAMECONTROLLERCONFIG_FILE`
+  or `SDL_GAMECONTROLLERCONFIG` (PortMaster maintainer guidance: mapping
+  gaps are CFW bugs to fix in gptokeyb/PortMaster, not per port).
+- gptokeyb is started the standard way, `$GPTOKEYB "starfox.${DEVICE_ARCH}" &`.
+  The binary was renamed from `starfox_pc.aarch64` (18 chars) to
+  `starfox.aarch64` (15 chars): Linux truncates process names to 15
+  characters, the suspected reason Select+Start did not kill the game on a
+  dArkOS/OGA tester's device. Unverified on OGA hardware.
+- Earlier KNULLI observation (RG40XX H): `get_controls` only put one
+  unrelated GUID into `/tmp/gamecontrollerdb.txt`, and the game logged
+  `gamepad=0`. Re-check native gamepad input on the RG40XX H after removing
+  the override; if it regresses, report it upstream to PortMaster.
 - RG40XX H GUID: `19000000010000000100000000010000`
   (`Anbernic RG40XX-H Controller`, 4 axes, 17 buttons, 1 hat).
 - Native SDL gamepad input is used. Do not replace analog controls with
@@ -100,5 +101,6 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 
 - Supported inputs are exactly the pinned upstream's `retail_variants`
   table (1 MiB, optional 512-byte copier header, CRC-32 match). The
-  launcher checks candidates with `check-rom.sh` and skips unsupported
-  dumps instead of passing the first `*.sfc`/`*.smc` through.
+  launcher checks candidates' CRC-32 inline (PortMaster ports may ship only
+  one `.sh`) and skips unsupported dumps instead of passing the first
+  `*.sfc`/`*.smc` through.

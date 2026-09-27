@@ -54,12 +54,6 @@ targets:
   never be created through it -- use the GPU/OpenGLES2 render path instead.
   This port patches the engine so that choosing the "Software" renderer
   falls back to the default renderer rather than crashing on every launch.
-- If the CFW's `control.txt`/`get_controls()` only populates
-  `SDL_GAMECONTROLLERCONFIG_FILE` with a single unrelated controller's
-  mapping (check for a `# TODO: figure out SDL_GAMECONTROLLERCONFIG`-style
-  comment), point it at the CFW's own complete `gamecontrollerdb.txt`
-  instead -- this also fixes gptokeyb's own select+start exit-kill switch,
-  which depends on the same recognition.
 - A dArkOS tester hit a fatal `SDL_OpenAudioDeviceStream` failure: ALSA's
   `default` device's `dmix`/`dsnoop` plugin failed to create its IPC
   semaphore in that CFW's sandbox, and the engine treats a failed audio

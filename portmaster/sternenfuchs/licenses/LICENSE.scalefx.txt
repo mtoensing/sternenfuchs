@@ -1,5 +1,5 @@
 The portable ScaleFX edge-smoothing compute shader is compiled into
-starfox_pc.aarch64 as part of the Star Fox Enhanced runtime, derived from
+starfox.aarch64 as part of the Star Fox Enhanced runtime, derived from
 Sp00kyFox's ScaleFX passes 0-4 in libretro/slang-shaders. This prototype's
 shipped pregame.cfg disables the effects that use it (ANTI_ALIASING,
 ENHANCED_GRAPHICS, TWO_D_FILTER), but the shader is present in the binary.

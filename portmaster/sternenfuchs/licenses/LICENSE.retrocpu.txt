@@ -1,4 +1,4 @@
-RetroCPU is statically linked into starfox_pc.aarch64 as part of the
+RetroCPU is statically linked into starfox.aarch64 as part of the
 Star Fox Enhanced runtime (src/simulation/wdc65816.hpp).
 
 Source: https://github.com/achaulk/retro_cpu

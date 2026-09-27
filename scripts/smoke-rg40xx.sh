@@ -12,10 +12,10 @@ cd "$GAMEDIR" || exit 1
 echo "=== target ==="
 uname -a
 echo "=== binary ==="
-file ./starfox_pc.aarch64 2>/dev/null || true
+file ./starfox.aarch64 2>/dev/null || true
 echo "=== deps ==="
 LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-  ldd ./starfox_pc.aarch64 2>&1 || true
+  ldd ./starfox.aarch64 2>&1 || true
 
 if [ ! -f pregame.cfg ] && [ -f prototype-pregame.cfg ]; then
   cp prototype-pregame.cfg pregame.cfg
@@ -23,8 +23,7 @@ fi
 
 ROM=""
 for f in ./*.sfc ./*.smc ./*.SFC ./*.SMC; do
-  [ -f "$f" ] || continue
-  if sh ./check-rom.sh "$f"; then ROM="$f"; break; fi
+  [ -f "$f" ] && { ROM="$f"; break; }
 done
 
 if [ ! -f Starfox-Assets.BIN ] && [ -z "$ROM" ]; then
@@ -32,7 +31,7 @@ if [ ! -f Starfox-Assets.BIN ] && [ -z "$ROM" ]; then
   exit 2
 fi
 
-chmod +x ./starfox_pc.aarch64
+chmod +x ./starfox.aarch64
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export SDL3SHIM_SDL2_LIB="${SDL3SHIM_SDL2_LIB:-libSDL2-2.0.so.0}"
@@ -65,7 +64,7 @@ export STARFOX_TEST_PRESENTATION_FPS=60
 export STARFOX_TEST_VSYNC=0
 export STARFOX_TRACE_FPS=1
 
-timeout 30 ./starfox_pc.aarch64 > smoke.log 2>&1
+timeout 30 ./starfox.aarch64 > smoke.log 2>&1
 rc=$?
 cat smoke.log
 exit $rc

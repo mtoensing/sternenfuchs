@@ -1,4 +1,4 @@
-dr_flac (dr_libs) is compiled into starfox_pc.aarch64 as part of the
+dr_flac (dr_libs) is compiled into starfox.aarch64 as part of the
 Star Fox Enhanced runtime's audio decoding.
 
 Source: https://github.com/mackron/dr_libs

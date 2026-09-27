@@ -44,7 +44,7 @@ export STARFOX_TEST_STATE_DIRECTORY="$STATES"
 if [ "$MAKE_STATE" = 1 ]; then
   presses=""; for f in $(seq 90 90 1350); do presses="$presses${presses:+,}$f:4096"; done
   STARFOX_TEST_FRAMES=1720 STARFOX_TEST_PRESSES="$presses" STARFOX_TEST_STATE_ACTIONS=1700:1 \
-    timeout 120 ./starfox_pc.aarch64 2>&1 | grep 'state saved' || { echo "state save failed"; exit 1; }
+    timeout 120 ./starfox.aarch64 2>&1 | grep 'state saved' || { echo "state save failed"; exit 1; }
 fi
 ls "$STATES"/*-0.sfe >/dev/null 2>&1 || { echo "no bench state; run with --make-state"; exit 1; }
 
@@ -53,12 +53,12 @@ run() {  # $1 = frames, $2 = 1 to sample CPU mid-run; prints elapsed ms
   start=$(date +%s%N)
   STARFOX_TEST_FRAMES="$1" STARFOX_TEST_STATE_ACTIONS=5:2 STARFOX_TRACE_PROFILE=1 \
     STARFOX_TEST_PROFILE_WARMUP=30 STARFOX_TRACE_PROFILE_DISTRIBUTION=1 \
-    timeout 120 ./starfox_pc.aarch64 > /tmp/bench.log 2>&1 &
+    timeout 120 ./starfox.aarch64 > /tmp/bench.log 2>&1 &
   pid=$!
   if [ "${2:-0}" = 1 ]; then
     sleep 6
     head -5 /proc/stat > /tmp/stat0; sleep 4; head -5 /proc/stat > /tmp/stat1
-    top -bn1 -H -p "$(pgrep -f starfox_pc.aarch64 | head -1)" 2>/dev/null \
+    top -bn1 -H -p "$(pgrep -f starfox.aarch64 | head -1)" 2>/dev/null \
       | awk 'NR>7 && $9+0 >= 5 {printf "  thread %-16s %s%%\n", $12, $9}' > /tmp/threads.txt
   fi
   wait "$pid"

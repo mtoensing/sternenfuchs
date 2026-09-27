@@ -113,7 +113,7 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
 cmake --build "$BUILD" -j"$(nproc)" --target starfox_pc
 
-cp "$BUILD/starfox_pc" "$DIST/sternenfuchs/starfox_pc.aarch64"
+cp "$BUILD/starfox_pc" "$DIST/sternenfuchs/starfox.aarch64"
 
 SDL_SO="$(find "$PREFIX" -type f -name 'libSDL3.so.0*' | head -1)"
 test -n "$SDL_SO"
@@ -129,11 +129,10 @@ cp "$ROOT/portmaster/sternenfuchs/cover.png" "$DIST/cover.png"
 # resolves correctly once installed, not just at the zip's top level.
 cp "$ROOT/portmaster/sternenfuchs/screenshot.png" "$DIST/sternenfuchs/screenshot.png"
 cp "$ROOT/portmaster/sternenfuchs/prototype-pregame.cfg" "$DIST/sternenfuchs/prototype-pregame.cfg"
-cp "$ROOT/scripts/check-rom.sh" "$DIST/sternenfuchs/check-rom.sh"
 cp -r "$ROOT/portmaster/sternenfuchs/licenses" "$DIST/sternenfuchs/licenses"
 
-file "$DIST/sternenfuchs/starfox_pc.aarch64"
-readelf -d "$DIST/sternenfuchs/starfox_pc.aarch64" | grep NEEDED || true
+file "$DIST/sternenfuchs/starfox.aarch64"
+readelf -d "$DIST/sternenfuchs/starfox.aarch64" | grep NEEDED || true
 
 # Two different consumers need two different layouts:
 # - sternenfuchs.zip: what PortMaster's own auto-install/sideload feature

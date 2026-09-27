@@ -1,4 +1,4 @@
-snes_spc 0.9.0 is statically linked into starfox_pc.aarch64 as part of the
+snes_spc 0.9.0 is statically linked into starfox.aarch64 as part of the
 Star Fox Enhanced runtime's audio emulation.
 
 Source: https://github.com/blarggs-audio-libraries/snes_spc
