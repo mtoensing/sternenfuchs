@@ -58,8 +58,9 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 ## Controller
 
 - Controller mapping is left entirely to PortMaster (`get_controls`) and
-  gptokeyb; the launcher does not override `SDL_GAMECONTROLLERCONFIG_FILE`
-  or `SDL_GAMECONTROLLERCONFIG` (PortMaster maintainer guidance: mapping
+  gptokeyb; the launcher only does the template's
+  `export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"` and never
+  overrides `SDL_GAMECONTROLLERCONFIG_FILE` (PortMaster maintainer guidance: mapping
   gaps are CFW bugs to fix in gptokeyb/PortMaster, not per port).
 - gptokeyb is started the standard way, `$GPTOKEYB "starfox.${DEVICE_ARCH}" &`.
   The binary was renamed from `starfox_pc.aarch64` (18 chars) to
@@ -81,10 +82,9 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 - Reported by a dArkOS tester (not reproduced on this device): ALSA's
   `default` `dmix`/`dsnoop` plugin failed to create its IPC semaphore, so
   `SDL_OpenAudioDeviceStream` failed and the engine exited before the menu.
-- `Sternenfuchs.sh` retries once with SDL2's `dummy` audio driver when the
-  first launch fails on that error. Verified on the RG40XX H by forcing an
-  invalid audio driver: the retry starts the game silently.
-- The dummy driver is a fallback/diagnostic only; audio must work normally.
+- The launcher's silent-audio retry for this was removed (non-standard
+  per-port workaround). Unresolved: needs a fix in the CFW or in how the
+  engine opens audio, reproduced on dArkOS hardware.
 
 ## Deployment and user data
 

@@ -17,11 +17,15 @@ source "$controlfolder/control.txt"
 get_controls
 
 GAMEDIR="/$directory/ports/sternenfuchs"
+CONFDIR="$GAMEDIR/conf/"
 BIN="$GAMEDIR/starfox.${DEVICE_ARCH}"
 
+mkdir -p "$GAMEDIR/conf"
 cd "$GAMEDIR"
 > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
+export XDG_DATA_HOME="$CONFDIR"
+export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # SDL3 shim -> CFW's patched SDL2.
@@ -59,14 +63,5 @@ $GPTOKEYB "starfox.${DEVICE_ARCH}" &
 
 pm_platform_helper "$BIN"
 "$BIN"
-STATUS=$?
-
-# If the CFW's default ALSA device fails to open, retry once without audio.
-if [ "$STATUS" -ne 0 ] && grep -q "SDL_OpenAudioDeviceStream" "$GAMEDIR/log.txt" 2>/dev/null; then
-  echo "Audio device failed to open; retrying with audio disabled." >&2
-  export SDL3SHIM_SDL2_AUDIODRIVER=dummy
-  export SDL_AUDIODRIVER=sdl2
-  "$BIN"
-fi
 
 pm_finish
