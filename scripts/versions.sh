@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-STARFOX_REPO="https://github.com/kandowontu/starfox-enhanced.git"
+STARFOX_REPO="https://github.com/juliopw/starfox-enhanced.git"
 STARFOX_COMMIT="6612cb05e4bda0a5e25e8e805d64d0e3db50896a"
 
 SDL_SHIM_REPO="https://github.com/bmdhacks/SDL.git"
