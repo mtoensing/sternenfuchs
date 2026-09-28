@@ -4,3 +4,4 @@ device-logs/
 *.sfc
 *.smc
 Starfox-Assets.BIN
+.DS_Store
