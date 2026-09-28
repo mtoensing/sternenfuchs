@@ -1,6 +1,7 @@
 ## Notes
 
-Thanks to KandoWontU for [Star Fox Enhanced](https://github.com/kandowontu/starfox-enhanced),
+Thanks to KandoWontU for [Star Fox Enhanced](https://archive.softwareheritage.org/swh:1:rev:6612cb05e4bda0a5e25e8e805d64d0e3db50896a;origin=https://github.com/kandowontu/starfox-enhanced)
+(original repository since deleted; link points to the Software Heritage archive),
 the open-source native runtime this port packages, and to Team SFEX
 (Star Fox EX) and SunlitSpace542 (UltraStarFox) for the community projects it
 builds on. Thanks to bmdhacks for the SDL3-to-SDL2 backend shim.
@@ -31,7 +32,7 @@ Expect roughly 30-45 FPS in flight on H700-class devices; game speed stays
 correct regardless.
 
 Third-party licenses are in `sternenfuchs/licenses/`; full credits are in
-upstream's [CREDITS.md](https://github.com/kandowontu/starfox-enhanced/blob/main/CREDITS.md).
+upstream's [CREDITS.md](https://archive.softwareheritage.org/swh:1:rev:6612cb05e4bda0a5e25e8e805d64d0e3db50896a;origin=https://github.com/kandowontu/starfox-enhanced;path=/CREDITS.md).
 
 ## Controls
 

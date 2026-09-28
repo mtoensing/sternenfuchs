@@ -59,7 +59,8 @@ esac
 rm -rf "$WORK" "$DIST"
 mkdir -p "$PREFIX" "$DIST/sternenfuchs/libs.aarch64"
 
-git clone "$STARFOX_REPO" "$SRC"
+# LFS objects (Windows exe, MSU-1 pack) are unused and gone with upstream.
+GIT_LFS_SKIP_SMUDGE=1 git clone "$STARFOX_REPO" "$SRC"
 git -C "$SRC" checkout "$STARFOX_COMMIT"
 
 git clone "$SDL_SHIM_REPO" "$SDL"

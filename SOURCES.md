@@ -1,7 +1,8 @@
 # Exact references
 
 ## Star Fox Enhanced
-- https://github.com/kandowontu/starfox-enhanced
+- https://github.com/kandowontu/starfox-enhanced (deleted 2026-09-28)
+- archived: https://archive.softwareheritage.org/swh:1:rev:6612cb05e4bda0a5e25e8e805d64d0e3db50896a;origin=https://github.com/kandowontu/starfox-enhanced
 - pinned commit: `6612cb05e4bda0a5e25e8e805d64d0e3db50896a`
 - build: `docs/BUILDING.md`
 - root build logic: `CMakeLists.txt`
