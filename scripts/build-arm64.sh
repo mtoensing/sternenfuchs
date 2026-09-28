@@ -143,11 +143,14 @@ readelf -d "$DIST/sternenfuchs/starfox.aarch64" | grep NEEDED || true
 #   tester: "it only needs the folder and the .sh at the root level").
 # - sternenfuchs-pr.zip: the AGENTS.md PR-submission layout (port.json,
 #   README.md, gameinfo.xml, screenshot/cover) for when this actually goes
-#   to PortsMaster/PortMaster-New -- not for sideloading.
+#   to PortsMaster-MV/PortMaster-MV-New -- not for sideloading. The repo's
+#   build_release.py copies the top-level screenshot into the port folder
+#   itself, so the sideload copy is excluded to avoid a duplicate entry.
 (
   cd "$DIST"
   zip -qr sternenfuchs.zip Sternenfuchs.sh sternenfuchs
-  zip -qr sternenfuchs-pr.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.png cover.png sternenfuchs
+  zip -qr sternenfuchs-pr.zip Sternenfuchs.sh port.json README.md gameinfo.xml screenshot.png cover.png sternenfuchs \
+    -x sternenfuchs/screenshot.png
 )
 echo "Created: $DIST/sternenfuchs.zip (sideload/auto-install layout)"
 echo "Created: $DIST/sternenfuchs-pr.zip (PR-submission layout)"
