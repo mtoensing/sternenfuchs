@@ -1,0 +1,251 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 17:30:45 +0200
+Subject: [PATCH] perf: dynamic band scheduling for parallel BG2, parallel HDR
+ pass, shift/mask tile addressing, more profile stages
+
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+index badc144..3ac292a 100644
+--- a/include/starfox/app/frame_profile.hpp
++++ b/include/starfox/app/frame_profile.hpp
+@@ -49,6 +49,10 @@ enum class Stage : unsigned {
+     tick_only,     // game.tick duration, recorded on tick frames only
+     rtx_lighting,  // CPU RTX lighting pass (inside effects)
+     hdr_effect,    // CPU HDR curve pass (inside effects)
++    cpu_shadow,    // CPU shadow-mask darkening (inside effects)
++    overlay,       // FPS overlay painting (inside effects)
++    bg2,           // BackgroundRenderer::draw_bg2, all calls in the frame
++    bg2_calls,     // number of draw_bg2 calls per frame (1 ms == 1 call)
+     count
+ };
+ 
+@@ -219,7 +223,7 @@ public:
+             "logic", "audio", "background", "world", "composite", "expand",
+             "effects", "update_texture", "render_texture", "render_present",
+             "present_total", "frame_work", "pacer_wait", "frame_interval",
+-            "tick_only", "rtx_lighting", "hdr_effect"};
++            "tick_only", "rtx_lighting", "hdr_effect", "cpu_shadow", "overlay", "bg2", "bg2_calls"};
+         out << "profile-frames=" << frames_ << " vsync=" << (vsync ? 1 : 0) << '\n';
+         char line[192];
+         for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
+diff --git a/include/starfox/render/hdr_effect.hpp b/include/starfox/render/hdr_effect.hpp
+index 02fd3b3..27733e5 100644
+--- a/include/starfox/render/hdr_effect.hpp
++++ b/include/starfox/render/hdr_effect.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ #include "starfox/render/framebuffer.hpp"
++#include "starfox/render/row_workers.hpp"
+ #include <array>
+ #include <cmath>
+ 
+@@ -7,7 +8,8 @@ namespace starfox::render {
+ // SDR brightness/contrast styling only: does not request an HDR swapchain,
+ // change display metadata, or claim additional physical display headroom.
+ inline void apply_hdr_effect(const Framebuffer& frame,
+-    std::vector<std::uint8_t>& rgba, std::uint8_t intensity) {
++    std::vector<std::uint8_t>& rgba, std::uint8_t intensity,
++    RowWorkers* workers = nullptr) {
+     if (intensity==0 || intensity>3 || !frame.layer_tags_enabled()
+         || rgba.size()!=frame.pixels().size()*4U) return;
+     std::array<std::uint8_t,256> curve{};
+@@ -21,10 +23,16 @@ inline void apply_hdr_effect(const Framebuffer& frame,
+             255*(lifted*(1-contrast)+shaped*contrast)));
+     }
+     const auto& tags=frame.layer_tags();
+-    for (std::size_t pixel=0;pixel<frame.pixels().size();++pixel) {
+-        if (tags[pixel]==static_cast<std::uint8_t>(PixelLayer::two_d)) continue;
+-        for (unsigned channel=0;channel<3;++channel)
+-            rgba[pixel*4+channel]=curve[rgba[pixel*4+channel]];
+-    }
++    // Every pixel is independent, so the frame splits cleanly into row bands.
++    const std::size_t width=frame.stored_width();
++    const auto rows=frame.stored_height();
++    const auto band=[&](std::uint32_t first,std::uint32_t last) {
++        for (std::size_t pixel=std::size_t(first)*width;pixel<std::size_t(last)*width;++pixel) {
++            if (tags[pixel]==static_cast<std::uint8_t>(PixelLayer::two_d)) continue;
++            for (unsigned channel=0;channel<3;++channel)
++                rgba[pixel*4+channel]=curve[rgba[pixel*4+channel]];
++        }
++    };
++    if (workers!=nullptr) workers->parallel_rows(rows,band); else band(0U,rows);
+ }
+ } // namespace starfox::render
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 84303e3..20f0961 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -218,7 +218,11 @@ public:
+         starfox::render::GpuBackgroundSettings s;s.layer=2;s.priority=priority;s.horizontal_origin=origin;
+         s.scroll_x=x;s.scroll_y=y;s.extend_horizontal=extend;s.wrap_horizontal=wrap;
+         s.transparent_cgram_black=black;s.single_occurrence_top_rows=rows;s.unique_regions.assign(regions.begin(),regions.end());
+-        if(!record(frame,s)) BackgroundRenderer::draw_bg2(ppu,x,y,frame,priority,origin,extend,wrap,black,rows,regions);
++        if(!record(frame,s)) {
++            const starfox::app::ScopedStage profile_bg2{starfox::app::Stage::bg2};
++            starfox::app::FrameProfile::get().add_ns(starfox::app::Stage::bg2_calls,1'000'000U);
++            BackgroundRenderer::draw_bg2(ppu,x,y,frame,priority,origin,extend,wrap,black,rows,regions);
++        }
+     }
+     void draw_bg3(const starfox::simulation::SnesPpuState& ppu,starfox::render::Framebuffer& frame,
+         starfox::render::TilePriorityPass priority=starfox::render::TilePriorityPass::all,int origin=0,bool extend=true) const {
+@@ -2340,7 +2344,7 @@ public:
+             }
+             {
+                 const starfox::app::ScopedStage profile_hdr{starfox::app::Stage::hdr_effect};
+-                starfox::render::apply_hdr_effect(framebuffer,rgba_,effects.hdr_effect);
++                starfox::render::apply_hdr_effect(framebuffer,rgba_,effects.hdr_effect,&presentation_workers_);
+             }
+             starfox::render::apply_chromatic_aberration(framebuffer, rgba_,
+                 chromatic_scratch_, effects.chromatic_aberration);
+@@ -2362,6 +2366,7 @@ public:
+             cpu_shadow=&fallback_shadow;
+         }
+         if (!early_on_gpu && cpu_shadow != nullptr) {
++            const starfox::app::ScopedStage profile_shadow{starfox::app::Stage::cpu_shadow};
+             for (std::uint32_t y=0; y<framebuffer.stored_height(); ++y) {
+                 const auto sy=static_cast<int>(y)-effects.shadow_offset_y;
+                 if (sy<0 || sy>=static_cast<int>(effects.shadow_height)) continue;
+@@ -2382,6 +2387,7 @@ public:
+             }
+         }
+         if (effects.host_overlay != nullptr) {
++            const starfox::app::ScopedStage profile_overlay{starfox::app::Stage::overlay};
+             const auto& overlay = *effects.host_overlay;
+             const auto paint = [this, &framebuffer, &stored_pixel,
+                                    render_scale](
+diff --git a/src/render/background_renderer.cpp b/src/render/background_renderer.cpp
+index a55d977..066494b 100644
+--- a/src/render/background_renderer.cpp
++++ b/src/render/background_renderer.cpp
+@@ -4,6 +4,7 @@
+ #include <cstdlib>
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <array>
+ #include <cmath>
+ #include <cstddef>
+@@ -246,10 +247,14 @@ void BackgroundRenderer::draw_bg2(
+     const auto tile_edge = ppu.bg2_tile_size_16 ? 16U : 8U;
+     const auto width_pixels = static_cast<std::int32_t>(width_tiles * tile_edge);
+     const auto height_pixels = static_cast<std::int32_t>(height_tiles * tile_edge);
++    // Tilemap extents are 32/64 tiles of 8/16 pixels, so every modulus here is
++    // a power of two and the tile edge a shift. For a power-of-two modulus,
++    // `value & (modulus - 1)` equals the non-negative remainder (also for
++    // negative values in two's complement) without a hardware divide per pixel.
+     const auto wrap = [](std::int32_t value, std::int32_t modulus) {
+-        value %= modulus;
+-        return value < 0 ? value + modulus : value;
++        return value & (modulus - 1);
+     };
++    const auto tile_shift = ppu.bg2_tile_size_16 ? 4U : 3U;
+     auto black_colour = std::uint8_t{};
+     auto darkest = std::numeric_limits<unsigned>::max();
+     for (std::size_t index = 0U; index < ppu.cgram.size(); ++index) {
+@@ -436,7 +441,7 @@ void BackgroundRenderer::draw_bg2(
+     // command recording, which appends to a shared list) stays serial.
+     // Every slice owns its decode caches; they are pure functions of the PPU
+     // snapshot, so the output is identical to a single serial pass.
+-    const auto render_rows = [&](std::uint32_t row_begin, std::uint32_t row_end) {
++    const auto render_rows = [&](const auto& next_band) {
+     // Decode each referenced 8x8 character and tilemap entry once per pass.
+     // Wide Mode 2 otherwise reread four planar VRAM bytes and reconstructed
+     // the same nibble for every output pixel—well over 170,000 times per
+@@ -481,7 +486,9 @@ void BackgroundRenderer::draw_bg2(
+         }
+         return decoded_tilemap[index];
+     };
+-    for (std::uint32_t screen_y = row_begin; screen_y < row_end; ++screen_y) {
++    std::uint32_t band_begin{}, band_end{};
++    while (next_band(band_begin, band_end))
++    for (std::uint32_t screen_y = band_begin; screen_y < band_end; ++screen_y) {
+         const auto sample_y = mosaic_coordinate(
+             static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x02U);
+         const auto row_scroll_x = ppu.bg2_horizontal_offsets_enabled
+@@ -545,7 +552,7 @@ void BackgroundRenderer::draw_bg2(
+                     continue;
+                 }
+             }
+-            const auto tile_y = static_cast<std::uint32_t>(source_y) / tile_edge;
++            const auto tile_y = static_cast<std::uint32_t>(source_y) >> tile_shift;
+             const auto unwrapped_source_x = sample_x + row_scroll_x;
+             // Scanline scrolling also drives open water (Titania). It is not
+             // evidence of a closed tunnel. Actual tunnel margins were handled
+@@ -588,7 +595,7 @@ void BackgroundRenderer::draw_bg2(
+                 const auto water_x = wrap(128 + row_scroll_x, width_pixels) + sample_x - 128;
+                 source_x = std::clamp(water_x, 0, width_pixels - 1);
+             }
+-            const auto tile_x = static_cast<std::uint32_t>(source_x) / tile_edge;
++            const auto tile_x = static_cast<std::uint32_t>(source_x) >> tile_shift;
+             const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
+             const auto entry = page * 0x400U
+                 + (tile_y & 31U) * 32U + (tile_x & 31U);
+@@ -647,11 +654,39 @@ void BackgroundRenderer::draw_bg2(
+         }
+     }
+     };
++    const auto run_serial = [&] {
++        auto pending = true;
++        render_rows([&](std::uint32_t& begin, std::uint32_t& end) {
++            if (!pending) return false;
++            pending = false;
++            begin = 0U;
++            end = target.height();
++            return true;
++        });
++    };
++    // Row cost is uneven (the ground rows do far more than the sky), so a fixed
++    // even split leaves the other threads waiting on one slice. Participants
++    // instead claim small bands from a shared counter until none are left.
++    const auto run_parallel = [&] {
++        constexpr std::uint32_t band_rows = 8U;
++        const auto rows = target.height();
++        const auto bands = (rows + band_rows - 1U) / band_rows;
++        std::atomic<std::uint32_t> next{0U};
++        row_workers->parallel_rows(rows, [&](std::uint32_t, std::uint32_t) {
++            render_rows([&](std::uint32_t& begin, std::uint32_t& end) {
++                const auto band = next.fetch_add(1U, std::memory_order_relaxed);
++                if (band >= bands) return false;
++                begin = band * band_rows;
++                end = std::min(rows, begin + band_rows);
++                return true;
++            });
++        });
++    };
+     if (row_workers != nullptr && !extend_ground_down
+         && target.command_buffer() == nullptr) {
+         // STARFOX_VERIFY_PARALLEL=1 draws every BG2 pass twice -- serially and
+-        // in row bands, from the same starting framebuffer -- and reports any
+-        // byte that differs (pixels or layer tags).
++        // in bands, from the same starting framebuffer -- and reports any byte
++        // that differs (pixels or layer tags).
+         static const bool verify = std::getenv("STARFOX_VERIFY_PARALLEL") != nullptr;
+         if (verify) {
+             struct Tally {
+@@ -665,21 +700,21 @@ void BackgroundRenderer::draw_bg2(
+             static Tally tally;
+             const auto pixels_before = target.pixels();
+             const auto tags_before = target.layer_tags();
+-            render_rows(0U, target.height());
++            run_serial();
+             const auto serial_pixels = target.pixels();
+             const auto serial_tags = target.layer_tags();
+             target.pixels() = pixels_before;
+             target.layer_tags() = tags_before;
+-            row_workers->parallel_rows(target.height(), render_rows);
++            run_parallel();
+             ++tally.draws;
+             if (target.pixels() != serial_pixels || target.layer_tags() != serial_tags) {
+                 ++tally.mismatches;
+             }
+         } else {
+-            row_workers->parallel_rows(target.height(), render_rows);
++            run_parallel();
+         }
+     } else {
+-        render_rows(0U, target.height());
++        run_serial();
+     }
+ }
+ 
