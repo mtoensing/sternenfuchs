@@ -1,0 +1,342 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:00:38 +0200
+Subject: [PATCH] perf: RowWorkers claims bands from a shared counter;
+ table-driven parallel colour math
+
+Uneven rows (models mid-frame, ground vs sky) no longer wait on the slowest
+static slice, and late-waking workers are not waited for. Output is
+byte-identical (frame/audio digests unchanged).
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+index 87d6e0f..42a9969 100644
+--- a/include/starfox/app/frame_profile.hpp
++++ b/include/starfox/app/frame_profile.hpp
+@@ -55,6 +55,8 @@ enum class Stage : unsigned {
+     bg2_calls,     // number of draw_bg2 calls per frame (1 ms == 1 call)
+     filter_pass,   // 2D filter attempt, inside effects
+     style_pass,    // smoothing/effect/bloom/AA block, inside effects
++    sub_overlays,  // subtractive overlay compositing, inside effects
++    colour_math,   // colour-math pass, inside effects
+     gpu_probe,     // run_gpu_effects attempts (flush + unavailable-GPU fallback), inside effects
+     work_tick,     // frame_work of frames that ran a logic tick
+     work_plain,    // frame_work of frames that did not
+@@ -237,7 +239,7 @@ public:
+             "logic", "audio", "background", "world", "composite", "expand",
+             "effects", "update_texture", "render_texture", "render_present",
+             "present_total", "frame_work", "pacer_wait", "frame_interval",
+-            "tick_only", "rtx_lighting", "hdr_effect", "cpu_shadow", "overlay", "bg2", "bg2_calls", "filter_pass", "style_pass", "gpu_probe", "work_tick", "work_plain"};
++            "tick_only", "rtx_lighting", "hdr_effect", "cpu_shadow", "overlay", "bg2", "bg2_calls", "filter_pass", "style_pass", "sub_overlays", "colour_math", "gpu_probe", "work_tick", "work_plain"};
+         out << "profile-frames=" << frames_ << " vsync=" << (vsync ? 1 : 0) << '\n';
+         char line[192];
+         for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
+diff --git a/include/starfox/render/colour_math.hpp b/include/starfox/render/colour_math.hpp
+index 6089da5..dacba77 100644
+--- a/include/starfox/render/colour_math.hpp
++++ b/include/starfox/render/colour_math.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "starfox/render/framebuffer.hpp"
++#include "starfox/render/row_workers.hpp"
+ #include "starfox/simulation/game_simulation.hpp"
+ #include <array>
+ 
+@@ -9,20 +10,34 @@ namespace starfox::render {
+ // Fixed-colour windows leave OBJ untouched unless CGADSUB explicitly includes
+ // it. In particular, revival's blackfade must not erase the STAGE sprites.
+ inline void apply_colour_math(const simulation::ColourMathEffectState& effect,
+-    const Framebuffer& frame, std::vector<std::uint8_t>& rgba) {
++    const Framebuffer& frame, std::vector<std::uint8_t>& rgba,
++    RowWorkers* workers = nullptr) {
+     if (!effect.active || effect.affected_layers == 0U
+         || rgba.size() != frame.pixels().size()*4U) return;
+     const auto expand = [](std::uint8_t v) { return int((v&31U)*8U + ((v&31U)>>2U)); };
+     const std::array fixed{expand(effect.red),expand(effect.green),expand(effect.blue)};
+-    for (std::size_t i=0; i<frame.pixels().size(); ++i) {
+-        if (frame.pixels()[i]>=128U && (effect.affected_layers&0x10U)==0U) continue;
+-        for (unsigned c=0; c<3; ++c) {
+-            int value=rgba[i*4+c];
+-            value=effect.subtract ? value-fixed[c] : value+fixed[c];
++    // The result depends only on the channel's byte, so tabulate it once per
++    // channel (same expression, same truncating halve and clamp) and let the
++    // pixels index it.
++    std::array<std::array<std::uint8_t,256>,3> table{};
++    for (unsigned c=0; c<3; ++c) {
++        for (int v=0; v<256; ++v) {
++            int value=effect.subtract ? v-fixed[c] : v+fixed[c];
+             if (effect.half) value/=2;
+-            rgba[i*4+c]=std::uint8_t(std::clamp(value,0,255));
++            table[c][v]=std::uint8_t(std::clamp(value,0,255));
+         }
+     }
++    const bool skip_sprites=(effect.affected_layers&0x10U)==0U;
++    const std::size_t width=frame.stored_width();
++    const auto& pixels=frame.pixels();
++    const auto band=[&](std::uint32_t first,std::uint32_t last) {
++        for (std::size_t i=std::size_t(first)*width; i<std::size_t(last)*width; ++i) {
++            if (skip_sprites && pixels[i]>=128U) continue;
++            std::uint8_t* p=&rgba[i*4];
++            p[0]=table[0][p[0]]; p[1]=table[1][p[1]]; p[2]=table[2][p[2]];
++        }
++    };
++    if (workers!=nullptr) workers->parallel_rows(frame.stored_height(),band); else band(0U,frame.stored_height());
+ }
+ 
+ } // namespace starfox::render
+diff --git a/include/starfox/render/row_workers.hpp b/include/starfox/render/row_workers.hpp
+index f1b93a4..1ec5c89 100644
+--- a/include/starfox/render/row_workers.hpp
++++ b/include/starfox/render/row_workers.hpp
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <atomic>
+ #include <condition_variable>
+ #include <cstdint>
+ #include <functional>
+@@ -30,27 +31,32 @@ public:
+     void set_worker_count(std::size_t workers);
+     [[nodiscard]] std::size_t worker_count() const noexcept { return workers_; }
+ 
+-    // Runs `body(first_row, last_row)` over a half-open partition of
+-    // [0, rows). The calling thread takes the first slice and waits for the
+-    // rest, so no work is queued behind an idle dispatcher. `body` must not
+-    // write outside the rows it is given.
++    // Runs `body(first_row, last_row)` over half-open bands that together
++    // cover [0, rows) exactly once. The calling thread and the workers claim
++    // bands from a shared counter, so uneven rows balance themselves; no
++    // assumption may be made about which thread runs which band or in what
++    // order. `body` must not write outside the rows it is given.
+     void parallel_rows(
+         std::uint32_t rows,
+         const std::function<void(std::uint32_t, std::uint32_t)>& body);
+ 
+ private:
+     void stop_pool();
++    void run_chunks();
+ 
+     std::vector<std::thread> pool_;
+     std::mutex mutex_;
+     std::condition_variable work_ready_;
+     std::condition_variable work_done_;
+     const std::function<void(std::uint32_t, std::uint32_t)>* job_{};
+-    std::vector<std::uint32_t> job_bounds_;
++    std::uint32_t job_rows_{};
++    std::uint32_t job_chunk_{1U};
++    std::atomic<std::uint32_t> next_chunk_{0U};
+     std::size_t workers_{};
+     std::size_t pending_{};
+     std::uint64_t generation_{};
+     bool stopping_{false};
++    bool job_open_{false};
+ };
+ 
+ } // namespace starfox::render
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 986a3ea..c423c40 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -1906,6 +1906,7 @@ public:
+         gpu_frame_pending_=false;
+         ensure_dimensions(
+             framebuffer.stored_width(), framebuffer.stored_height());
++        starfox::app::mark_phase(7);
+         {
+             const starfox::app::ScopedStage profile_expand{starfox::app::Stage::expand};
+             starfox::render::expand_rgba(
+@@ -1926,6 +1927,7 @@ public:
+         }();
+         starfox::render::GpuEffectSettings filter_gpu;
+         filter_gpu.filter=static_cast<unsigned>(two_d_filter_);filter_gpu.highlight_filter=highlight_filtered;
++        starfox::app::mark_phase(8);
+         const auto profile_filter_begin = std::chrono::steady_clock::now();
+         if (!apply_gpu_effects(framebuffer,filter_gpu))
+             starfox::render::apply_two_d_filter(
+@@ -2042,10 +2044,13 @@ public:
+                 }
+             }
+         };
+-        composite_subtractive_overlay(
+-            effects.overlay, effects.overlay_brightness);
+-        composite_subtractive_overlay(
+-            effects.text_overlay, effects.text_overlay_brightness);
++        {
++            const starfox::app::ScopedStage profile_overlays{starfox::app::Stage::sub_overlays};
++            composite_subtractive_overlay(
++                effects.overlay, effects.overlay_brightness);
++            composite_subtractive_overlay(
++                effects.text_overlay, effects.text_overlay_brightness);
++        }
+         const auto subtract_fixed_white = [this](
+                                               std::size_t pixel,
+                                               std::uint8_t amount) {
+@@ -2189,7 +2194,10 @@ public:
+                 }
+             }
+         }
+-        starfox::render::apply_colour_math(effects.colour_math, framebuffer, rgba_);
++        {
++            const starfox::app::ScopedStage profile_math{starfox::app::Stage::colour_math};
++            starfox::render::apply_colour_math(effects.colour_math, framebuffer, rgba_, &presentation_workers_);
++        }
+         if (effects.planet.isolate_fade) {
+             for (std::int32_t y = 0;
+                  y < static_cast<std::int32_t>(framebuffer.height()); ++y) {
+@@ -2343,8 +2351,10 @@ public:
+         if (!early_on_gpu) {
+             if (rtx_lighting_) {
+                 const starfox::app::ScopedStage profile_rtx{starfox::app::Stage::rtx_lighting};
++                starfox::app::mark_phase(9);
+                 apply_rtx_lighting(framebuffer,effects);
+             }
++            starfox::app::mark_phase(10);
+             {
+                 const starfox::app::ScopedStage profile_hdr{starfox::app::Stage::hdr_effect};
+                 starfox::render::apply_hdr_effect(framebuffer,rgba_,effects.hdr_effect,&presentation_workers_);
+@@ -2352,6 +2362,7 @@ public:
+             starfox::render::apply_chromatic_aberration(framebuffer, rgba_,
+                 chromatic_scratch_, effects.chromatic_aberration);
+         }
++        starfox::app::mark_phase(11);
+         std::vector<std::uint8_t> fallback_shadow;
+         const auto* cpu_shadow=effects.shadow_mask;
+         if(!early_on_gpu && effects.resident_shadow.buffer) {
+@@ -2532,6 +2543,7 @@ public:
+             // once in the uploaded style pass and then a second time below.
+             style_gpu.setup_overlay.reset();style_gpu.touch_controls=false;
+         }
++        starfox::app::mark_phase(12);
+         const auto profile_style_begin = std::chrono::steady_clock::now();
+         if (!apply_gpu_effects(framebuffer,style_gpu)) {
+             starfox::render::smooth_models(model_smoothing_, framebuffer, rgba_, smoothing_scratch_, &presentation_workers_);
+@@ -2546,6 +2558,7 @@ public:
+         }
+         starfox::app::FrameProfile::get().add(starfox::app::Stage::style_pass,
+             profile_style_begin, std::chrono::steady_clock::now());
++        starfox::app::mark_phase(13);
+         if (effects.setup_overlay) {
+             const auto& overlay = *effects.setup_overlay;
+             const auto origin = (framebuffer.width() - 256U) / 2U;
+@@ -2581,6 +2594,7 @@ public:
+             prepare_1440p_model_layer(framebuffer, effects);
+             if (bloom_layer_ready_) rgba_.swap(bloom_base_rgba_);
+         }
++        starfox::app::mark_phase(14);
+         present_rgba_pixels(
+             framebuffer.stored_width(), framebuffer.stored_height(), rgba_);
+     }
+diff --git a/src/render/row_workers.cpp b/src/render/row_workers.cpp
+index 69403a9..ad4adfe 100644
+--- a/src/render/row_workers.cpp
++++ b/src/render/row_workers.cpp
+@@ -25,11 +25,26 @@ void RowWorkers::stop_pool() {
+     pool_.clear();
+     generation_ = 0U;
+     job_ = nullptr;
+-    job_bounds_.clear();
+     pending_ = 0U;
+     stopping_ = false;
+ }
+ 
++void RowWorkers::run_chunks() {
++    // Rows cost unevenly (models cover the middle of the frame, ground rows do
++    // more than sky), so an even split leaves the fast threads waiting for the
++    // slow one. Everyone instead claims small bands from a shared counter.
++    const auto* job = job_;
++    const auto rows = job_rows_;
++    const auto chunk = job_chunk_;
++    const auto chunks = (rows + chunk - 1U) / chunk;
++    for (;;) {
++        const auto index = next_chunk_.fetch_add(1U, std::memory_order_relaxed);
++        if (index >= chunks) return;
++        const auto first = index * chunk;
++        (*job)(first, std::min(rows, first + chunk));
++    }
++}
++
+ void RowWorkers::set_worker_count(std::size_t workers) {
+     if (workers == 0U) {
+         const auto detected = std::thread::hardware_concurrency();
+@@ -41,12 +56,9 @@ void RowWorkers::set_worker_count(std::size_t workers) {
+     if (workers_ <= 1U) return;
+     pool_.reserve(workers_ - 1U);
+     for (std::size_t index = 0; index < workers_ - 1U; ++index) {
+-        pool_.emplace_back([this, index] {
++        pool_.emplace_back([this] {
+             std::uint64_t seen = 0U;
+             for (;;) {
+-                const std::function<void(std::uint32_t, std::uint32_t)>* job{};
+-                std::uint32_t first = 0U;
+-                std::uint32_t last = 0U;
+                 {
+                     std::unique_lock<std::mutex> lock{mutex_};
+                     work_ready_.wait(lock, [this, &seen] {
+@@ -54,15 +66,13 @@ void RowWorkers::set_worker_count(std::size_t workers) {
+                     });
+                     if (stopping_) return;
+                     seen = generation_;
+-                    // Slice 0 belongs to the dispatching thread.
+-                    const auto slot = (index + 1U) * 2U;
+-                    if (slot + 1U < job_bounds_.size()) {
+-                        first = job_bounds_[slot];
+-                        last = job_bounds_[slot + 1U];
+-                        job = job_;
+-                    }
++                    // A worker that wakes after every band was claimed (and
++                    // the dispatcher closed the job) has nothing to do and the
++                    // dispatcher does not wait for it.
++                    if (!job_open_) continue;
++                    ++pending_;
+                 }
+-                if (job != nullptr && first < last) (*job)(first, last);
++                run_chunks();
+                 {
+                     const std::lock_guard<std::mutex> lock{mutex_};
+                     if (--pending_ == 0U) work_done_.notify_one();
+@@ -90,33 +100,28 @@ void RowWorkers::parallel_rows(
+         return;
+     }
+ 
+-    const auto span = rows / static_cast<std::uint32_t>(slices);
+-    const auto remainder = rows % static_cast<std::uint32_t>(slices);
+-
+     {
+         const std::lock_guard<std::mutex> lock{mutex_};
+-        // Reuse the persistent job storage instead of allocating a temporary
+-        // partition vector and copying it for every presentation pass.
+-        job_bounds_.resize(slices * 2U);
+-        std::uint32_t cursor = 0U;
+-        for (std::size_t slice = 0; slice < slices; ++slice) {
+-            const auto length = span
+-                + (slice < remainder ? std::uint32_t{1U} : std::uint32_t{0U});
+-            job_bounds_[slice * 2U] = cursor;
+-            cursor += length;
+-            job_bounds_[slice * 2U + 1U] = cursor;
+-        }
+         job_ = &body;
+-        pending_ = pool_.size();
++        job_rows_ = rows;
++        // At least four bands per participant so uneven rows even out, but
++        // never bands so thin that claiming them costs more than they hold.
++        job_chunk_ = std::max<std::uint32_t>(
++            4U, rows / static_cast<std::uint32_t>(slices * 4U));
++        next_chunk_.store(0U, std::memory_order_relaxed);
++        pending_ = 0U;
++        job_open_ = true;
+         ++generation_;
+     }
+     work_ready_.notify_all();
+-    body(0U, span + (remainder != 0U ? 1U : 0U));
++    run_chunks();
+     {
++        // Close the job to late wakers, then wait only for workers that are
++        // still inside a band.
+         std::unique_lock<std::mutex> lock{mutex_};
++        job_open_ = false;
+         work_done_.wait(lock, [this] { return pending_ == 0U; });
+         job_ = nullptr;
+-        job_bounds_.clear();
+     }
+ }
+ 

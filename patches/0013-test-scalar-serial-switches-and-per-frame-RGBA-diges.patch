@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:55:58 +0200
+Subject: [PATCH] test: scalar/serial switches and per-frame RGBA digest for
+ byte-exact verification
+
+
+diff --git a/include/starfox/render/hdr_effect.hpp b/include/starfox/render/hdr_effect.hpp
+index 3143a76..fd77a3b 100644
+--- a/include/starfox/render/hdr_effect.hpp
++++ b/include/starfox/render/hdr_effect.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ #include "starfox/render/framebuffer.hpp"
+ #include "starfox/render/row_workers.hpp"
++#include "starfox/render/simd_switch.hpp"
+ #include <array>
+ #include <cmath>
+ #include <cstring>
+@@ -34,6 +35,7 @@ inline void apply_hdr_effect(const Framebuffer& frame,
+         std::size_t pixel=std::size_t(first)*width;
+         const std::size_t end=std::size_t(last)*width;
+ #if defined(__ARM_NEON)
++        if (simd_enabled()) {
+         // Four pixels per step: the 256-entry curve is four 64-byte table
+         // lookups (out-of-range lanes read 0, so the four results OR together),
+         // applied to R, G and B only; alpha and 2D-layer pixels keep their bytes.
+@@ -58,6 +60,7 @@ inline void apply_hdr_effect(const Framebuffer& frame,
+                     vqtbl4q_u8(table3,vsubq_u8(source,one_ninety_two))));
+             vst1q_u8(rgba.data()+pixel*4,vbslq_u8(lane_mask,lut,source));
+         }
++        }
+ #endif
+         for (;pixel<end;++pixel) {
+             if (tags[pixel]==static_cast<std::uint8_t>(PixelLayer::two_d)) continue;
+diff --git a/include/starfox/render/simd_switch.hpp b/include/starfox/render/simd_switch.hpp
+new file mode 100644
+index 0000000..a7bbc37
+--- /dev/null
++++ b/include/starfox/render/simd_switch.hpp
+@@ -0,0 +1,14 @@
++#pragma once
++
++#include <cstdlib>
++
++namespace starfox::render {
++
++// STARFOX_NO_SIMD=1 selects the scalar loops behind every NEON fast path, so a
++// run can be compared byte for byte against the scalar reference.
++[[nodiscard]] inline bool simd_enabled() noexcept {
++    static const bool enabled = std::getenv("STARFOX_NO_SIMD") == nullptr;
++    return enabled;
++}
++
++} // namespace starfox::render
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 12142c7..c84752f 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -1286,6 +1286,8 @@ public:
+ class Window {
+ public:
+     explicit Window(starfox::simulation::RendererMode renderer_mode,DlssHost* dlss=nullptr):dlss_(dlss) {
++        if (const auto* threads = std::getenv("STARFOX_RENDER_THREADS"))
++            presentation_workers_.set_worker_count(static_cast<std::size_t>(std::atoi(threads)));
+ #if defined(STARFOX_UWP) || defined(__ANDROID__)
+         constexpr auto window_flags = SDL_WINDOW_FULLSCREEN;
+ #else
+@@ -9815,7 +9817,8 @@ int main(int argc, char** argv) {
+             presentation_effects.circle_right = static_cast<std::int16_t>(
+                 136 + viewport_origin);
+             presentation_effects.circle_bottom = 112;
+-            if (game.show_fps()) {
++            // The live FPS readout differs run to run; digest runs leave it out.
++            if (game.show_fps() && std::getenv("STARFOX_TRACE_FRAME_HASH") == nullptr) {
+                 presentation_effects.host_overlay = &live_fps_overlay;
+                 presentation_effects.host_overlay_x =
+                     static_cast<std::int32_t>(display_width
+@@ -9883,6 +9886,14 @@ int main(int argc, char** argv) {
+             frame_profile.add(starfox::app::Stage::present_total,
+                 profile_present_begin, std::chrono::steady_clock::now());
+             window.finish_temporal_frame(temporal_presented);
++            if (test_frames != 0U && std::getenv("STARFOX_TRACE_FRAME_HASH") != nullptr) {
++                // The presented RGBA frame, after every CPU presentation pass.
++                std::uint64_t hash = 1469598103934665603ULL;
++                for (const auto byte : window.rgba()) hash = (hash ^ byte) * 1099511628211ULL;
++                std::fprintf(stderr, "rgba-hash %llu %016llx\n",
++                    static_cast<unsigned long long>(presented_frames),
++                    static_cast<unsigned long long>(hash));
++            }
+             framebuffer.end_write_coverage();
+             if (test_frames != 0 && presented_frames + 1U == test_frames) {
+                 if (const auto* raw_capture = std::getenv("STARFOX_CAPTURE_INDEXED_PATH"))
+diff --git a/src/render/framebuffer.cpp b/src/render/framebuffer.cpp
+index 5551164..fe2857c 100644
+--- a/src/render/framebuffer.cpp
++++ b/src/render/framebuffer.cpp
+@@ -1,5 +1,6 @@
+ #include "starfox/render/framebuffer.hpp"
+ #include "starfox/render/palette.hpp"
++#include "starfox/render/simd_switch.hpp"
+ 
+ #include <array>
+ #include <type_traits>
+@@ -135,7 +136,8 @@ void composite_transparent_layer(const Framebuffer& source,
+                 // colour is non-zero; every array takes a bitwise select.
+                 const auto geometry = vdupq_n_u8(geometry_tag);
+                 const auto one = vdupq_n_u8(1U);
+-                for (; i + 16U <= count; i += 16U) {
++                const auto vector_end = simd_enabled() ? count : std::size_t{0};
++                for (; i + 16U <= vector_end; i += 16U) {
+                     const auto source_v = vld1q_u8(s + i);
+                     const auto written = vtstq_u8(source_v, source_v);
+                     vst1q_u8(d + i, vbslq_u8(written, source_v, vld1q_u8(d + i)));

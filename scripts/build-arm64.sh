@@ -39,7 +39,7 @@ PGO_LTO="ON"
 case "$STARFOX_PGO_PHASE" in
   generate)
     mkdir -p "$PGO_DATA_DIR"
-    PGO_CXX_FLAGS="-fprofile-generate=$PGO_DATA_DIR -fprofile-update=atomic"
+    PGO_CXX_FLAGS="-fprofile-generate=$PGO_DATA_DIR -fprofile-update=atomic -DSTARFOX_PGO_GENERATE=1"
     PGO_LINKER_FLAGS="-fprofile-generate=$PGO_DATA_DIR"
     # LTO's cross-TU inlining changes which call sites even exist, which
     # fights with per-callsite instrumentation counters -- profile with a
@@ -92,8 +92,9 @@ cmake -S "$SDL" -B "$SDL/build" -G Ninja \
 cmake --build "$SDL/build" -j"$(nproc)"
 cmake --install "$SDL/build"
 
-git -C "$SRC" apply "$ROOT/patches/0001-system-sdl3.patch"
-git -C "$SRC" apply "$ROOT/patches/0002-software-renderer-fallback.patch"
+for patch in "$ROOT"/patches/*.patch; do
+  git -C "$SRC" apply "$patch"
+done
 
 # The RG40XX H (H700) is a quad-core Cortex-A53 @ 1.5GHz; real-device
 # testing showed the game pegging a single core at 100% while the other

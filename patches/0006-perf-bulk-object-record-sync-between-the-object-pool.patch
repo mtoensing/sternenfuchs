@@ -1,0 +1,363 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 17:21:06 +0200
+Subject: [PATCH] perf: bulk object-record sync between the object pool and
+ 65C816 work RAM
+
+Every strategy call re-syncs the whole object list in both directions, byte by
+byte through a field-lookup chain, which was ~70% of the logic tick. Pack and
+unpack each record in one unrolled pass and move it with a block copy; output is
+byte-identical (frame and audio digests unchanged over 960 frames).
+
+diff --git a/include/starfox/simulation/object_pool.hpp b/include/starfox/simulation/object_pool.hpp
+index 304b757..18b5ff4 100644
+--- a/include/starfox/simulation/object_pool.hpp
++++ b/include/starfox/simulation/object_pool.hpp
+@@ -94,6 +94,11 @@ public:
+     [[nodiscard]] std::uint8_t read_base_byte(ObjectHandle handle, std::uint16_t offset) const;
+     [[nodiscard]] std::uint16_t read_base_word(ObjectHandle handle, std::uint16_t offset) const;
+     void write_base_byte(ObjectHandle handle, std::uint16_t offset, std::uint8_t value);
++    // Bulk forms of read_base_byte/write_base_byte over offsets [first, last):
++    // out[i] / in[i] holds the byte at offset first + i. Identical results to
++    // the byte accessors, without a field lookup per byte.
++    void pack_base_bytes(ObjectHandle handle, std::uint16_t first, std::uint16_t last, std::uint8_t* out) const;
++    void unpack_base_bytes(ObjectHandle handle, std::uint16_t first, std::uint16_t last, const std::uint8_t* in);
+     void write_base_word(ObjectHandle handle, std::uint16_t offset, std::uint16_t value);
+     void write_base_long(ObjectHandle handle, std::uint16_t offset, std::uint32_t value);
+     [[nodiscard]] std::uint8_t read_path_byte(ObjectHandle handle, std::uint8_t encoded_offset) const;
+diff --git a/include/starfox/simulation/wdc65816.hpp b/include/starfox/simulation/wdc65816.hpp
+index 4108912..38ec6d8 100644
+--- a/include/starfox/simulation/wdc65816.hpp
++++ b/include/starfox/simulation/wdc65816.hpp
+@@ -122,6 +122,13 @@ public:
+     [[nodiscard]] std::optional<std::uint16_t> peek_ram16(std::uint32_t address) const noexcept;
+     void write8(std::uint32_t address, std::uint8_t value);
+     void write16(std::uint32_t address, std::uint16_t value);
++    // Bulk copies for ranges that lie entirely in plain work RAM ($7E/$7F, or
++    // the $0000-$1FFF mirror in banks $00-$3F/$80-$BF). They have exactly the
++    // effect of the same run of read8/write8 calls, minus the per-byte bus
++    // dispatch. Return false, having touched nothing, for any other range so
++    // the caller can fall back to the byte accessors.
++    [[nodiscard]] bool read_wram_block(std::uint32_t address, std::uint8_t* out, std::size_t count) const noexcept;
++    [[nodiscard]] bool write_wram_block(std::uint32_t address, const std::uint8_t* in, std::size_t count) noexcept;
+     [[nodiscard]] bool load_cartridge_ram(
+         std::span<const std::uint8_t> bytes) noexcept;
+     [[nodiscard]] std::span<const std::uint8_t> cartridge_ram() const noexcept;
+diff --git a/src/simulation/map_vm.cpp b/src/simulation/map_vm.cpp
+index 3316bd6..7233265 100644
+--- a/src/simulation/map_vm.cpp
++++ b/src/simulation/map_vm.cpp
+@@ -13,6 +13,8 @@
+ 
+ namespace starfox::simulation {
+ namespace {
++// Upper bound for one object's base or extended record image (al_size <= 57).
++constexpr std::size_t kMaximumObjectImageBytes = 64U;
+ 
+ constexpr std::uint16_t kOriginalObjectBase = 0x0338U;
+ constexpr std::uint16_t kOriginalObjectSize = 56U;
+@@ -692,15 +694,24 @@ void MapVm::sync_objects_to_cpu() {
+             ? original_object_pointer(active[index + 1U]) : 0U);
+         cpu_.write16(base + 2U, index != 0
+             ? original_object_pointer(active[index - 1U]) : 0U);
+-        for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
+-            cpu_.write8(base + offset, read_native_object_byte(handle, offset));
++        // The record is packed in one pass and copied to work RAM as a block;
++        // the byte-at-a-time accessors made this loop the dominant cost of a
++        // tick, because every strategy call re-syncs the whole object list.
++        std::array<std::uint8_t, kMaximumObjectImageBytes> image;
++        objects_->pack_base_bytes(handle, 4U, object_size_, image.data());
++        if (!cpu_.write_wram_block(base + 4U, image.data(), object_size_ - 4U)) {
++            for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
++                cpu_.write8(base + offset, image[offset - 4U]);
++            }
+         }
+         const auto& object = objects_->at(handle);
+         cpu_.write16(base + 6U, original_object_pointer(object.attached));
+         cpu_.write16(base + 25U, original_object_pointer(object.immune_object));
+         cpu_.write16(base + 27U, original_object_pointer(object.collision_object));
+-        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
+-            cpu_.write8(extended_base + offset, object.extended[offset]);
++        if (!cpu_.write_wram_block(extended_base, object.extended.data(), extended_object_bytes_)) {
++            for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
++                cpu_.write8(extended_base + offset, object.extended[offset]);
++            }
+         }
+         cpu_.write16(extended_base + 19U, original_object_pointer(object.fire_object));
+     }
+@@ -738,16 +749,26 @@ void MapVm::sync_objects_from_cpu() {
+         const auto base = static_cast<std::uint32_t>(original_object_pointer(handle));
+         const auto extended_base = extended_object_base_
+             + static_cast<std::uint32_t>(handle - 1U) * object_size_;
+-        for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
+-            write_native_object_byte(handle, offset, cpu_.read8(base + offset));
++        std::array<std::uint8_t, kMaximumObjectImageBytes> image;
++        if (!cpu_.read_wram_block(base + 4U, image.data(), object_size_ - 4U)) {
++            for (std::uint16_t offset = 4; offset < object_size_; ++offset) {
++                image[offset - 4U] = cpu_.read8(base + offset);
++            }
+         }
++        objects_->unpack_base_bytes(handle, 4U, object_size_, image.data());
+         auto& object = objects_->at(handle);
+         object.attached = object_handle(cpu_.read16(base + 6U));
+         object.immune_object = object_handle(cpu_.read16(base + 25U));
+         object.collision_object = object_handle(cpu_.read16(base + 27U));
++        std::array<std::uint8_t, kMaximumObjectImageBytes> extended_image;
++        if (!cpu_.read_wram_block(extended_base, extended_image.data(), extended_object_bytes_)) {
++            for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
++                extended_image[offset] = cpu_.read8(extended_base + offset);
++            }
++        }
+         for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
+             objects_->write_path_byte(handle, static_cast<std::uint8_t>(0x80U + offset),
+-                                      cpu_.read8(extended_base + offset));
++                                      extended_image[offset]);
+         }
+         object.fire_object = object_handle(cpu_.read16(extended_base + 19U));
+     }
+diff --git a/src/simulation/object_pool.cpp b/src/simulation/object_pool.cpp
+index 89e5576..8210c4b 100644
+--- a/src/simulation/object_pool.cpp
++++ b/src/simulation/object_pool.cpp
+@@ -232,9 +232,13 @@ void ObjectPool::restore_lists(
+     active_count_ = active.size();
+ }
+ 
+-std::uint8_t ObjectPool::read_base_byte(
+-    ObjectHandle handle, std::uint16_t offset) const {
+-    const auto& object = at(handle);
++namespace {
++// The record byte maps live in templates so ObjectPool::read_base_byte /
++// write_base_byte (any layout, any offset) and the bulk pack/unpack loops below
++// share one definition. With the layout fixed and the loop unrolled, every
++// offset constant-folds into a direct field access.
++template <ObjectMemoryLayout L>
++inline std::uint8_t read_base_byte_impl(const GameObject& object, std::uint16_t offset) {
+     const auto read_u16_byte = [offset](auto field, std::uint16_t base) {
+         return static_cast<std::uint8_t>(
+             static_cast<std::uint16_t>(field) >> ((offset - base) * 8U));
+@@ -243,7 +247,6 @@ std::uint8_t ObjectPool::read_base_byte(
+         return static_cast<std::uint8_t>(
+             std::bit_cast<std::uint16_t>(field) >> ((offset - base) * 8U));
+     };
+-
+     if (offset >= 4 && offset <= 5) return read_u16_byte(object.shape, 4);
+     if (offset >= 6 && offset <= 7) return read_u16_byte(object.attached, 6);
+     if (offset == 8) return object.flags;
+@@ -271,7 +274,7 @@ std::uint8_t ObjectPool::read_base_byte(
+     if (offset >= 40 && offset <= 41) return read_i16_byte(object.scratch_words[1], 40);
+     if (offset == 42) return object.health;
+     if (offset == 43) return object.attack_power;
+-    if (layout_ == ObjectMemoryLayout::starfox_ex) {
++    if (L == ObjectMemoryLayout::starfox_ex) {
+         if (offset == 44) return object.collision_count;
+         if (offset == 45) return object.collision_flags;
+         if (offset >= 46 && offset <= 47) return read_i16_byte(object.velocity_x, 46);
+@@ -298,15 +301,8 @@ std::uint8_t ObjectPool::read_base_byte(
+     throw std::out_of_range{"alien-block byte offset is outside al_size"};
+ }
+ 
+-std::uint16_t ObjectPool::read_base_word(
+-    ObjectHandle handle, std::uint16_t offset) const {
+-    return static_cast<std::uint16_t>(read_base_byte(handle, offset))
+-        | (static_cast<std::uint16_t>(read_base_byte(handle, offset + 1U)) << 8U);
+-}
+-
+-void ObjectPool::write_base_byte(
+-    ObjectHandle handle, std::uint16_t offset, std::uint8_t value) {
+-    auto& object = at(handle);
++template <ObjectMemoryLayout L>
++inline void write_base_byte_impl(GameObject& object, std::uint16_t offset, std::uint8_t value) {
+     const auto write_u16_byte = [offset, value](auto& field, std::uint16_t base) {
+         auto bits = static_cast<std::uint16_t>(field);
+         const auto shift = static_cast<unsigned>((offset - base) * 8U);
+@@ -349,46 +345,46 @@ void ObjectPool::write_base_byte(
+     else if (offset >= 40 && offset <= 41) write_i16_byte(object.scratch_words[1], 40);
+     else if (offset == 42) object.health = value;
+     else if (offset == 43) object.attack_power = value;
+-    else if (layout_ == ObjectMemoryLayout::starfox_ex && offset == 44) {
++    else if (L == ObjectMemoryLayout::starfox_ex && offset == 44) {
+         object.collision_count = value;
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex && offset == 45) {
++    } else if (L == ObjectMemoryLayout::starfox_ex && offset == 45) {
+         object.collision_flags = value;
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex
++    } else if (L == ObjectMemoryLayout::starfox_ex
+                && offset >= 46 && offset <= 47) {
+         write_i16_byte(object.velocity_x, 46);
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex
++    } else if (L == ObjectMemoryLayout::starfox_ex
+                && offset >= 48 && offset <= 49) {
+         write_i16_byte(object.velocity_y, 48);
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex
++    } else if (L == ObjectMemoryLayout::starfox_ex
+                && offset >= 50 && offset <= 51) {
+         write_i16_byte(object.velocity_z, 50);
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex && offset == 52) {
++    } else if (L == ObjectMemoryLayout::starfox_ex && offset == 52) {
+         object.hit_flags = value;
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex && offset == 53) {
++    } else if (L == ObjectMemoryLayout::starfox_ex && offset == 53) {
+         object.weapon_type = value; // EX's al_weaponnum
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex && offset == 54) {
++    } else if (L == ObjectMemoryLayout::starfox_ex && offset == 54) {
+         object.open_al = value;
+-    } else if (layout_ == ObjectMemoryLayout::starfox_ex
++    } else if (L == ObjectMemoryLayout::starfox_ex
+                && offset >= 55 && offset <= 56) {
+         object.scratch_bytes[offset - 51U] = std::bit_cast<std::int8_t>(value);
+-    } else if (layout_ == ObjectMemoryLayout::original && offset == 44) {
++    } else if (L == ObjectMemoryLayout::original && offset == 44) {
+         object.weapon_type = value;
+-    } else if (layout_ == ObjectMemoryLayout::original && offset == 45) {
++    } else if (L == ObjectMemoryLayout::original && offset == 45) {
+         object.collision_count = value;
+-    } else if (layout_ == ObjectMemoryLayout::original && offset == 46) {
++    } else if (L == ObjectMemoryLayout::original && offset == 46) {
+         object.collision_flags = value;
+-    } else if (layout_ == ObjectMemoryLayout::original
++    } else if (L == ObjectMemoryLayout::original
+                && offset >= 47 && offset <= 48) {
+         write_i16_byte(object.velocity_x, 47);
+-    } else if (layout_ == ObjectMemoryLayout::original
++    } else if (L == ObjectMemoryLayout::original
+                && offset >= 49 && offset <= 50) {
+         write_i16_byte(object.velocity_y, 49);
+-    } else if (layout_ == ObjectMemoryLayout::original
++    } else if (L == ObjectMemoryLayout::original
+                && offset >= 51 && offset <= 52) {
+         write_i16_byte(object.velocity_z, 51);
+-    } else if (layout_ == ObjectMemoryLayout::original && offset == 53) {
++    } else if (L == ObjectMemoryLayout::original && offset == 53) {
+         object.hit_flags = value;
+-    } else if (layout_ == ObjectMemoryLayout::original
++    } else if (L == ObjectMemoryLayout::original
+                && offset >= 54 && offset <= 55) {
+         object.scratch_bytes[offset - 50U] = std::bit_cast<std::int8_t>(value);
+     } else {
+@@ -396,6 +392,78 @@ void ObjectPool::write_base_byte(
+     }
+ }
+ 
++template <ObjectMemoryLayout L>
++void pack_bytes(const GameObject& object, std::uint16_t first, std::uint16_t last, std::uint8_t* out) {
++    // Offsets 4..63 cover every record size (al_size is at most 57).
++#pragma GCC unroll 64
++    for (std::uint16_t offset = 4; offset < 64; ++offset) {
++        if (offset >= first && offset < last) {
++            out[offset - first] = read_base_byte_impl<L>(object, offset);
++        }
++    }
++}
++
++template <ObjectMemoryLayout L>
++void unpack_bytes(GameObject& object, std::uint16_t first, std::uint16_t last, const std::uint8_t* in) {
++#pragma GCC unroll 64
++    for (std::uint16_t offset = 4; offset < 64; ++offset) {
++        if (offset >= first && offset < last) {
++            write_base_byte_impl<L>(object, offset, in[offset - first]);
++        }
++    }
++}
++} // namespace
++
++std::uint8_t ObjectPool::read_base_byte(
++    ObjectHandle handle, std::uint16_t offset) const {
++    const auto& object = at(handle);
++    return layout_ == ObjectMemoryLayout::starfox_ex
++        ? read_base_byte_impl<ObjectMemoryLayout::starfox_ex>(object, offset)
++        : read_base_byte_impl<ObjectMemoryLayout::original>(object, offset);
++}
++
++std::uint16_t ObjectPool::read_base_word(
++    ObjectHandle handle, std::uint16_t offset) const {
++    return static_cast<std::uint16_t>(read_base_byte(handle, offset))
++        | (static_cast<std::uint16_t>(read_base_byte(handle, offset + 1U)) << 8U);
++}
++
++void ObjectPool::write_base_byte(
++    ObjectHandle handle, std::uint16_t offset, std::uint8_t value) {
++    auto& object = at(handle);
++    if (layout_ == ObjectMemoryLayout::starfox_ex) {
++        write_base_byte_impl<ObjectMemoryLayout::starfox_ex>(object, offset, value);
++    } else {
++        write_base_byte_impl<ObjectMemoryLayout::original>(object, offset, value);
++    }
++}
++
++void ObjectPool::pack_base_bytes(
++    ObjectHandle handle, std::uint16_t first, std::uint16_t last, std::uint8_t* out) const {
++    const auto& object = at(handle);
++    if (first < 4U || last > 64U || first > last) {
++        throw std::out_of_range{"alien-block byte range is outside al_size"};
++    }
++    if (layout_ == ObjectMemoryLayout::starfox_ex) {
++        pack_bytes<ObjectMemoryLayout::starfox_ex>(object, first, last, out);
++    } else {
++        pack_bytes<ObjectMemoryLayout::original>(object, first, last, out);
++    }
++}
++
++void ObjectPool::unpack_base_bytes(
++    ObjectHandle handle, std::uint16_t first, std::uint16_t last, const std::uint8_t* in) {
++    auto& object = at(handle);
++    if (first < 4U || last > 64U || first > last) {
++        throw std::out_of_range{"alien-block byte range is outside al_size"};
++    }
++    if (layout_ == ObjectMemoryLayout::starfox_ex) {
++        unpack_bytes<ObjectMemoryLayout::starfox_ex>(object, first, last, in);
++    } else {
++        unpack_bytes<ObjectMemoryLayout::original>(object, first, last, in);
++    }
++}
++
+ void ObjectPool::write_base_word(
+     ObjectHandle handle, std::uint16_t offset, std::uint16_t value) {
+     write_base_byte(handle, offset, static_cast<std::uint8_t>(value));
+diff --git a/src/simulation/wdc65816.cpp b/src/simulation/wdc65816.cpp
+index 98399e1..ca40a44 100644
+--- a/src/simulation/wdc65816.cpp
++++ b/src/simulation/wdc65816.cpp
+@@ -2752,6 +2752,42 @@ void Wdc65816::write8(std::uint32_t address, std::uint8_t value) {
+     impl_->write8(address, value);
+ }
+ 
++namespace {
++// Index of `address` in work RAM when [address, address+count) is plain WRAM.
++std::optional<std::size_t> plain_wram_index(std::uint32_t address, std::size_t count, std::size_t wram_size) noexcept {
++    std::size_t index{};
++    std::size_t limit{};
++    if (address >= 0x7e0000U && address < 0x800000U) {
++        index = address - 0x7e0000U;
++        limit = 0x20000U;
++    } else {
++        const auto bank = address >> 16U, offset = address & 0xffffU;
++        if (!((bank < 0x40U) || (bank >= 0x80U && bank < 0xc0U)) || offset >= 0x2000U) return std::nullopt;
++        index = offset;
++        limit = 0x2000U;
++    }
++    // The range must stay inside the same mapping: a run that would cross the
++    // end of a mirror falls through to the byte accessors.
++    const auto room = limit - std::min(index, limit);
++    if (count > room || index + count > wram_size) return std::nullopt;
++    return index;
++}
++} // namespace
++
++bool Wdc65816::read_wram_block(std::uint32_t address, std::uint8_t* out, std::size_t count) const noexcept {
++    const auto index = plain_wram_index(address, count, impl_->wram.size());
++    if (!index) return false;
++    std::copy_n(impl_->wram.begin() + static_cast<std::ptrdiff_t>(*index), count, out);
++    return true;
++}
++
++bool Wdc65816::write_wram_block(std::uint32_t address, const std::uint8_t* in, std::size_t count) noexcept {
++    const auto index = plain_wram_index(address, count, impl_->wram.size());
++    if (!index) return false;
++    std::copy_n(in, count, impl_->wram.begin() + static_cast<std::ptrdiff_t>(*index));
++    return true;
++}
++
+ void Wdc65816::write16(std::uint32_t address, std::uint16_t value) {
+     write8(address, static_cast<std::uint8_t>(value));
+     write8(address + 1U, static_cast<std::uint8_t>(value >> 8U));
