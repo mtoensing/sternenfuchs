@@ -137,9 +137,16 @@ verify)
   name=$1 frames=${2:-600}
   BENCH_WARMUP=60   # fixed: the digest covers every frame, so runs must be the same length
   base_env "$STATES/$name"
-  read -r save_frame save_mode < "$STATES/$name/meta" 2>/dev/null || { save_frame=1400; save_mode=fire; }
-  export STARFOX_TEST_UNPACED=1 STARFOX_TEST_PRESSES="$(play_presses 10 $((frames + BENCH_WARMUP + 10)) "$save_mode" $(( (save_frame - 1400) / 30 )))"
-  export STARFOX_TEST_STATE_ACTIONS="5:2" STARFOX_TRACE_FRAME_HASH=1 STARFOX_TEST_AUDIO_SIGNATURES=1
+  if [ "$name" = boot ]; then
+    # No state: intro, title, menus, level launch wipe and the first flight
+    # (transitions, palette fades, text, sprites) from a cold start.
+    export STARFOX_TEST_PRESSES="$(join_presses "$(menu_presses)" "$(play_presses 1400 $((frames + 10)) fire)")"
+  else
+    read -r save_frame save_mode < "$STATES/$name/meta" 2>/dev/null || { save_frame=1400; save_mode=fire; }
+    export STARFOX_TEST_PRESSES="$(play_presses 10 $((frames + BENCH_WARMUP + 10)) "$save_mode" $(( (save_frame - 1400) / 30 )))"
+    export STARFOX_TEST_STATE_ACTIONS="5:2"
+  fi
+  export STARFOX_TEST_UNPACED=1 STARFOX_TRACE_FRAME_HASH=1 STARFOX_TEST_AUDIO_SIGNATURES=1
   one_run $((frames + BENCH_WARMUP)) > /tmp/verify.out
   echo "frames hashed: $(grep -c '^frame-hash' /tmp/verify.out)  audio ticks: $(grep -c '^audio-frame' /tmp/verify.out)"
   echo "video digest: $(grep '^frame-hash' /tmp/verify.out | md5sum | cut -c1-16)"

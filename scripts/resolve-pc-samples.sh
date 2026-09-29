@@ -17,7 +17,7 @@ for line in open(nmfile):
     p = line.rstrip("\n").split(" ", 2)
     if len(p) == 3 and p[1] in "tTwW":
         addrs.append(int(p[0], 16)); names.append(p[2])
-phase_names = {0:"other",1:"logic-tick",2:"audio",3:"background",4:"world",5:"composite",6:"present"}
+phase_names = {0:"other",1:"logic-tick",2:"audio",3:"background",4:"world",5:"composite",6:"present(other)",7:"present:pre-expand",8:"present:expand+filter-probe",9:"present:rtx-lighting",10:"present:hdr+chromatic",11:"present:shadow+overlay",12:"present:style-probe",13:"present:setup-overlay+bloom+aa",14:"present:sdl-upload+swap"}
 per = collections.defaultdict(collections.Counter); total = collections.Counter()
 for line in open(samples):
     f = line.split(" ", 3)
