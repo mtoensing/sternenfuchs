@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:36:08 +0200
+Subject: [PATCH] perf: dump PGO counters before shutdown in instrumented runs
+
+The SDL2 ALSA hotplug thread can fault during process teardown; an instrumented
+run that dies there lost most of its profile (24 of 63 files written).
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+index 42a9969..deb6d56 100644
+--- a/include/starfox/app/frame_profile.hpp
++++ b/include/starfox/app/frame_profile.hpp
+@@ -29,8 +29,31 @@
+ #include <unistd.h>
+ #endif
+ 
++#if defined(STARFOX_PGO_GENERATE)
++// libgcov entry points, referenced only by -fprofile-generate builds (the
++// build scripts define STARFOX_PGO_GENERATE for them; a weak reference would
++// not pull the members out of the static libgcov).
++extern "C" {
++void __gcov_dump(void);
++void __gcov_reset(void);
++}
++#endif
++
+ namespace starfox::app {
+ 
++// Writes the PGO counters now and zeroes them so the exit-time dump adds
++// nothing. The SDL2 backend's ALSA hotplug thread can fault while the process
++// is shutting down, and an instrumented run that dies in that window loses
++// most of its profile; benchmark runs call this before teardown instead.
++// Never inlined: the call site must look identical in generate and use builds,
++// or the profile of the (huge) calling function would stop matching.
++[[gnu::noinline]] inline void flush_pgo_counters() {
++#if defined(STARFOX_PGO_GENERATE)
++    __gcov_dump();
++    __gcov_reset();
++#endif
++}
++
+ enum class Stage : unsigned {
+     logic,         // game.tick + host bookkeeping, per frame (0 on non-tick frames)
+     audio,         // audio.queue_logic_tick
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index c423c40..12142c7 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -10141,6 +10141,7 @@ int main(int argc, char** argv) {
+                               << " playing=" << audio.msu1_playing() << '\n';
+                 }
+                 if (!capture_path.empty()) window.save_bmp(capture_path);
++                starfox::app::flush_pgo_counters();
+                 if (std::getenv("STARFOX_TRACE_RENDER_STATE") != nullptr) {
+                     std::cerr << "reticle experience=" << unsigned(active_experience)
+                         << " colour=" << unsigned(game.crosshair_colour())

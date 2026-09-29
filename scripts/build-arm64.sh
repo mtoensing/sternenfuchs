@@ -39,7 +39,7 @@ PGO_LTO="ON"
 case "$STARFOX_PGO_PHASE" in
   generate)
     mkdir -p "$PGO_DATA_DIR"
-    PGO_CXX_FLAGS="-fprofile-generate=$PGO_DATA_DIR -fprofile-update=atomic"
+    PGO_CXX_FLAGS="-fprofile-generate=$PGO_DATA_DIR -fprofile-update=atomic -DSTARFOX_PGO_GENERATE=1"
     PGO_LINKER_FLAGS="-fprofile-generate=$PGO_DATA_DIR"
     # LTO's cross-TU inlining changes which call sites even exist, which
     # fights with per-callsite instrumentation counters -- profile with a

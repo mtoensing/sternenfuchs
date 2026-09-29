@@ -68,7 +68,7 @@ WORK=$PWD/.work; PREFIX=$WORK/prefix; SDL=$WORK/SDL; SPIRV=$WORK/SPIRV-Cross
 SRC=$WORK/$DEV_SRC; BUILD=$WORK/starfox-build; OUT=$WORK/dev-out$TAG
 PGO_DIR=$PWD/pgo-data
 case "$PGO" in
-  generate) F="-fprofile-generate=$PGO_DIR -fprofile-update=atomic"; L="-fprofile-generate=$PGO_DIR"; LTO=OFF ;;
+  generate) F="-fprofile-generate=$PGO_DIR -fprofile-update=atomic -DSTARFOX_PGO_GENERATE=1"; L="-fprofile-generate=$PGO_DIR"; LTO=OFF ;;
   use) F="-fprofile-use=$PGO_DIR -fprofile-correction -Wno-error=coverage-mismatch -Wno-missing-profile"; L="-fprofile-use=$PGO_DIR"; LTO=ON ;;
   *) F=""; L=""; LTO=ON ;;
 esac
