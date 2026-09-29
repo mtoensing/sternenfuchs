@@ -23,7 +23,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            ca-certificates git cmake ninja-build build-essential python3 \
+            ca-certificates git curl cmake ninja-build build-essential python3 \
             zip file binutils pkg-config
 
       - uses: actions/checkout@v4

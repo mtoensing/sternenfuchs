@@ -60,8 +60,15 @@ rm -rf "$WORK" "$DIST"
 mkdir -p "$PREFIX" "$DIST/sternenfuchs/libs.aarch64"
 
 # LFS objects (Windows exe, MSU-1 pack) are unused and gone with upstream.
-GIT_LFS_SKIP_SMUDGE=1 git clone "$STARFOX_REPO" "$SRC"
-git -C "$SRC" checkout "$STARFOX_COMMIT"
+if [ -n "$STARFOX_REPO" ]; then
+  GIT_LFS_SKIP_SMUDGE=1 git clone "$STARFOX_REPO" "$SRC"
+  git -C "$SRC" checkout "$STARFOX_COMMIT"
+else
+  mkdir -p "$SRC"
+  curl -fsSL --retry 5 --retry-delay 10 \
+    "https://archive.softwareheritage.org/api/1/vault/flat/swh:1:dir:$STARFOX_SWH_DIR/raw/" \
+    | tar xz --strip-components=1 -C "$SRC"
+fi
 
 git clone "$SDL_SHIM_REPO" "$SDL"
 git -C "$SDL" checkout "$SDL_SHIM_COMMIT"
