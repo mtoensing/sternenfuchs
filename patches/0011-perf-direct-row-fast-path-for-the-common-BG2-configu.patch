@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:17:12 +0200
+Subject: [PATCH] perf: direct-row fast path for the common BG2 configuration
+
+
+diff --git a/src/render/background_renderer.cpp b/src/render/background_renderer.cpp
+index 066494b..f941796 100644
+--- a/src/render/background_renderer.cpp
++++ b/src/render/background_renderer.cpp
+@@ -486,6 +486,25 @@ void BackgroundRenderer::draw_bg2(
+         }
+         return decoded_tilemap[index];
+     };
++    const auto in_native_window = static_cast<std::int32_t>(first_x) - horizontal_origin >= 0
++        && static_cast<std::int32_t>(final_x) - horizontal_origin <= 256;
++    const auto simple_rows = in_native_window && (ppu.mosaic & 0x02U) == 0U
++        && wrap_horizontal && single_occurrence_top_rows == 0U
++        && unique_regions.empty() && last_opaque_ground.empty();
++    // Direct row writes are equivalent to Framebuffer::set only at draw scale 1
++    // when nothing is recording; anything else keeps using set().
++    const auto direct_writes = simple_rows && target.draw_scale() == 1U
++        && target.command_buffer() == nullptr;
++    const auto stored_row = static_cast<std::size_t>(target.stored_width());
++    std::uint8_t* const direct_pixels = direct_writes ? target.pixels().data() : nullptr;
++    std::uint8_t* const direct_tags = direct_writes && target.layer_tags_enabled()
++            && target.layer_tags().size() == target.pixels().size()
++        ? target.layer_tags().data() : nullptr;
++    std::uint8_t* const direct_coverage = direct_writes && target.tracks_write_coverage()
++        ? target.write_coverage_data() : nullptr;
++    const auto direct_tag = target.layer_override() < 0
++        ? static_cast<std::uint8_t>(PixelLayer::two_d)
++        : static_cast<std::uint8_t>(target.layer_override());
+     std::uint32_t band_begin{}, band_end{};
+     while (next_band(band_begin, band_end))
+     for (std::uint32_t screen_y = band_begin; screen_y < band_end; ++screen_y) {
+@@ -500,6 +519,60 @@ void BackgroundRenderer::draw_bg2(
+             : scroll_x;
+         const auto unique_scroll_x = unique_regions.empty() ? 0
+             : wrap(row_scroll_x + width_pixels / 2, width_pixels) - width_pixels / 2;
++        if (simple_rows) {
++            // Common gameplay configuration: every column lies inside the
++            // native 256-pixel window, no mosaic, no tunnel/water margin
++            // handling, no wide-mode ground continuation and no unique
++            // regions. The general loop below then reduces to this: same
++            // arithmetic, with the loop-invariant tests and the Framebuffer
++            // call overhead removed.
++            const auto register_scroll_y = ppu.bg2_scanline_scroll_enabled
++                ? ppu.bg2_scanline_scroll_y[std::clamp(sample_y, 0, 223)]
++                : scroll_y;
++            std::uint8_t* const row_pixels = direct_pixels
++                ? direct_pixels + static_cast<std::size_t>(screen_y) * stored_row : nullptr;
++            std::uint8_t* const row_tags = direct_tags
++                ? direct_tags + static_cast<std::size_t>(screen_y) * stored_row : nullptr;
++            std::uint8_t* const row_coverage = direct_coverage
++                ? direct_coverage + static_cast<std::size_t>(screen_y) * stored_row : nullptr;
++            for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
++                const auto logical_x = static_cast<std::int32_t>(screen_x)
++                    - horizontal_origin;
++                const auto tile_scroll_y = column_scroll_y.empty() ? no_column_scroll
++                    : column_scroll_y[static_cast<std::size_t>(screen_x) - first_x];
++                const auto current_scroll_y = tile_scroll_y != no_column_scroll
++                    ? tile_scroll_y : register_scroll_y;
++                const auto source_y = wrap(sample_y + current_scroll_y, height_pixels);
++                const auto source_x = wrap(logical_x + row_scroll_x, width_pixels);
++                const auto tile_y = static_cast<std::uint32_t>(source_y) >> tile_shift;
++                const auto tile_x = static_cast<std::uint32_t>(source_x) >> tile_shift;
++                const auto page = (tile_x >> 5U) + (tile_y >> 5U) * pages_wide;
++                const auto entry = page * 0x400U
++                    + (tile_y & 31U) * 32U + (tile_x & 31U);
++                const auto tile = cached_tilemap_word(entry);
++                if (!selected_priority(tile, priority)) continue;
++                const auto sample = tile_sample(
++                    tile, source_x, source_y, ppu.bg2_tile_size_16);
++                const auto colour = cached_character_pixel(sample);
++                if (colour == 0U) continue;
++                const auto indexed_colour = static_cast<std::uint8_t>(
++                    ((tile >> 10U) & 7U) * 16U + colour);
++                if (transparent_cgram_black
++                    && (ppu.cgram[indexed_colour] & 0x7fffU) == 0U) {
++                    continue;
++                }
++                if (row_pixels != nullptr) {
++                    // Framebuffer::set at draw scale 1, spelled out.
++                    if (row_coverage != nullptr) row_coverage[screen_x] = 1U;
++                    row_pixels[screen_x] = indexed_colour;
++                    if (row_tags != nullptr) row_tags[screen_x] = direct_tag;
++                } else {
++                    target.set(static_cast<std::int32_t>(screen_x),
++                        static_cast<std::int32_t>(screen_y), indexed_colour);
++                }
++            }
++            continue;
++        }
+         for (auto screen_x = first_x; screen_x < final_x; ++screen_x) {
+             const auto logical_x = static_cast<std::int32_t>(screen_x)
+                 - horizontal_origin;

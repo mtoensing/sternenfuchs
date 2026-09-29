@@ -11,10 +11,15 @@
 #   prepare  fetch upstream + apply patches/*.patch into .work/starfox-enhanced
 #   build    compile; result in .work/dev-out/{starfox.aarch64,libs.aarch64/}
 # Env: STARFOX_PGO_PHASE=none|use|generate (default: use if pgo-data exists)
+#      DEV_SRC=<dir under .work> to build another source tree (e.g. a git
+#      worktree of an earlier commit for A/B benchmarks); it gets its own build
+#      volume and output directory .work/dev-out-<dir>.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/versions.sh"
 CMD="${1:-build}"
+DEV_SRC="${DEV_SRC:-starfox-enhanced}"
+if [ "$DEV_SRC" = starfox-enhanced ]; then TAG=""; else TAG="-$DEV_SRC"; fi
 IMAGE=sternenfuchs-dev:22.04
 MOUNT=/__w/sternenfuchs/sternenfuchs   # PGO .gcda names embed this path
 
@@ -54,13 +59,13 @@ fi
 docker run --rm \
   -v "$ROOT":"$MOUNT" \
   -v sternenfuchs-prefix:"$MOUNT/.work/prefix" \
-  -v sternenfuchs-build:"$MOUNT/.work/starfox-build" \
+  -v sternenfuchs-build"$TAG":"$MOUNT/.work/starfox-build" \
   -v sternenfuchs-sdlbuild:"$MOUNT/.work/SDL" \
-  -e PGO="$PGO" -e SDL_SHIM_REPO="$SDL_SHIM_REPO" -e SDL_SHIM_COMMIT="$SDL_SHIM_COMMIT" \
+  -e PGO="$PGO" -e DEV_SRC="$DEV_SRC" -e TAG="$TAG" -e SDL_SHIM_REPO="$SDL_SHIM_REPO" -e SDL_SHIM_COMMIT="$SDL_SHIM_COMMIT" \
   -e SPIRV_CROSS_REPO="$SPIRV_CROSS_REPO" \
   -w "$MOUNT" "$IMAGE" bash -euo pipefail -c '
 WORK=$PWD/.work; PREFIX=$WORK/prefix; SDL=$WORK/SDL; SPIRV=$WORK/SPIRV-Cross
-SRC=$WORK/starfox-enhanced; BUILD=$WORK/starfox-build; OUT=$WORK/dev-out
+SRC=$WORK/$DEV_SRC; BUILD=$WORK/starfox-build; OUT=$WORK/dev-out$TAG
 PGO_DIR=$PWD/pgo-data
 case "$PGO" in
   generate) F="-fprofile-generate=$PGO_DIR -fprofile-update=atomic"; L="-fprofile-generate=$PGO_DIR"; LTO=OFF ;;

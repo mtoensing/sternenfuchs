@@ -18,7 +18,7 @@
 #       Boot and play through from the start, printing a per-second series of
 #       frame cost. Used to find heavy scenes worth saving as states.
 #
-# Env: BENCH_EXTRA="VAR=1 ...", BENCH_CFG=device|packaged, BENCH_PC=1 (also collect game-thread PC samples), RG40XX_HOST, RG40XX_USER, BENCH_UNPACED=1 (no 60 FPS pacer),
+# Env: BENCH_BINARY=<file in the game dir> (default starfox.aarch64), BENCH_EXTRA="VAR=1 ...", BENCH_CFG=device|packaged, BENCH_PC=1 (also collect game-thread PC samples), RG40XX_HOST, RG40XX_USER, BENCH_UNPACED=1 (no 60 FPS pacer),
 #      BENCH_VSYNC=1, BENCH_WARMUP (default 150), BENCH_LOG_DIR (local copy).
 set -euo pipefail
 HOST="${RG40XX_HOST:-192.168.178.76}"
@@ -33,7 +33,7 @@ LOCAL_LOG="$LOG_DIR/$STAMP-$CMD-${1:-}.log"
 ssh "${USER}@${HOST}" "CMD=$(printf %q "$CMD") ARGS=$(printf %q "$*")" \
     "BENCH_UNPACED=$(printf %q "${BENCH_UNPACED:-0}") BENCH_VSYNC=$(printf %q "${BENCH_VSYNC:-0}")" \
     "BENCH_WARMUP=$(printf %q "${BENCH_WARMUP:-150}") BENCH_SERIES=$(printf %q "${BENCH_SERIES:-}")" \
-    "BENCH_PC=$(printf %q "${BENCH_PC:-}") BENCH_CFG=$(printf %q "${BENCH_CFG:-device}") BENCH_EXTRA=$(printf %q "${BENCH_EXTRA:-}")" \
+    "BENCH_BINARY=$(printf %q "${BENCH_BINARY:-starfox.aarch64}") BENCH_PC=$(printf %q "${BENCH_PC:-}") BENCH_CFG=$(printf %q "${BENCH_CFG:-device}") BENCH_EXTRA=$(printf %q "${BENCH_EXTRA:-}")" \
     bash -s <<'REMOTE' 2>&1 | tee "$LOCAL_LOG"
 set -u
 GAMEDIR="/userdata/roms/ports/sternenfuchs"
@@ -92,7 +92,7 @@ one_run() {  # $1 frames; PRESSES/ACTIONS in env
   [ -n "${BENCH_PC:-}" ] && export STARFOX_TRACE_PC=1 STARFOX_TRACE_PC_FILE=/tmp/starfox-pc.txt
   STARFOX_TEST_FRAMES="$1" STARFOX_TRACE_PROFILE=1 \
     STARFOX_TEST_PROFILE_WARMUP="$BENCH_WARMUP" \
-    timeout 900 ./starfox.aarch64 2>&1 | grep -E '^(profile-|parallel-verify|audio-frame|frame-hash|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
+    timeout 900 "./$BENCH_BINARY" 2>&1 | grep -E '^(profile-|parallel-verify|audio-frame|frame-hash|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
 }
 
 case "$CMD" in
