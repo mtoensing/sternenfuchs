@@ -19,7 +19,7 @@
 #       frame cost. Used to find heavy scenes worth saving as states.
 #
 # Env: BENCH_EXTRA="VAR=1 ...", BENCH_CFG=device|packaged, BENCH_PC=1 (also collect game-thread PC samples), RG40XX_HOST, RG40XX_USER, BENCH_UNPACED=1 (no 60 FPS pacer),
-#      BENCH_VSYNC=1, BENCH_WARMUP (default 60), BENCH_LOG_DIR (local copy).
+#      BENCH_VSYNC=1, BENCH_WARMUP (default 150), BENCH_LOG_DIR (local copy).
 set -euo pipefail
 HOST="${RG40XX_HOST:-192.168.178.76}"
 USER="${RG40XX_USER:-root}"
@@ -32,7 +32,7 @@ LOCAL_LOG="$LOG_DIR/$STAMP-$CMD-${1:-}.log"
 # ssh joins its arguments into one remote command line, so quote the values.
 ssh "${USER}@${HOST}" "CMD=$(printf %q "$CMD") ARGS=$(printf %q "$*")" \
     "BENCH_UNPACED=$(printf %q "${BENCH_UNPACED:-0}") BENCH_VSYNC=$(printf %q "${BENCH_VSYNC:-0}")" \
-    "BENCH_WARMUP=$(printf %q "${BENCH_WARMUP:-60}") BENCH_SERIES=$(printf %q "${BENCH_SERIES:-}")" \
+    "BENCH_WARMUP=$(printf %q "${BENCH_WARMUP:-150}") BENCH_SERIES=$(printf %q "${BENCH_SERIES:-}")" \
     "BENCH_PC=$(printf %q "${BENCH_PC:-}") BENCH_CFG=$(printf %q "${BENCH_CFG:-device}") BENCH_EXTRA=$(printf %q "${BENCH_EXTRA:-}")" \
     bash -s <<'REMOTE' 2>&1 | tee "$LOCAL_LOG"
 set -u
@@ -135,6 +135,7 @@ verify)
   # builds/settings (BENCH_EXTRA="STARFOX_RENDER_THREADS=1 STARFOX_SYNC_AUDIO=1"
   # is the serial reference).
   name=$1 frames=${2:-600}
+  BENCH_WARMUP=60   # fixed: the digest covers every frame, so runs must be the same length
   base_env "$STATES/$name"
   read -r save_frame save_mode < "$STATES/$name/meta" 2>/dev/null || { save_frame=1400; save_mode=fire; }
   export STARFOX_TEST_UNPACED=1 STARFOX_TEST_PRESSES="$(play_presses 10 $((frames + BENCH_WARMUP + 10)) "$save_mode" $(( (save_frame - 1400) / 30 )))"

@@ -1,0 +1,279 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 17:52:16 +0200
+Subject: [PATCH] perf: NEON layer composite and HDR curve passes; more profile
+ stages
+
+Both are byte-identical to the scalar loops (frame/audio digests unchanged).
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+index 3ac292a..87d6e0f 100644
+--- a/include/starfox/app/frame_profile.hpp
++++ b/include/starfox/app/frame_profile.hpp
+@@ -53,6 +53,11 @@ enum class Stage : unsigned {
+     overlay,       // FPS overlay painting (inside effects)
+     bg2,           // BackgroundRenderer::draw_bg2, all calls in the frame
+     bg2_calls,     // number of draw_bg2 calls per frame (1 ms == 1 call)
++    filter_pass,   // 2D filter attempt, inside effects
++    style_pass,    // smoothing/effect/bloom/AA block, inside effects
++    gpu_probe,     // run_gpu_effects attempts (flush + unavailable-GPU fallback), inside effects
++    work_tick,     // frame_work of frames that ran a logic tick
++    work_plain,    // frame_work of frames that did not
+     count
+ };
+ 
+@@ -189,15 +194,24 @@ public:
+         }
+         for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
+             const auto stage = static_cast<Stage>(i);
+-            if (stage == Stage::frame_interval || stage == Stage::tick_only) continue;
++            if (stage == Stage::frame_interval || stage == Stage::tick_only
++                || stage == Stage::work_tick || stage == Stage::work_plain) continue;
+             // Stages that did not run this frame (e.g. no tick) still count as
+             // zero so per-frame means stay comparable with the frame budget.
+             samples_[i].push_back(static_cast<std::uint32_t>(
+                 std::min<std::uint64_t>(current_[i], 0xffffffffULL)));
+         }
+-        if (current_seen_[static_cast<unsigned>(Stage::tick_only)])
+-            samples_[static_cast<unsigned>(Stage::tick_only)].push_back(
+-                static_cast<std::uint32_t>(current_[static_cast<unsigned>(Stage::tick_only)]));
++        {
++            const auto work = static_cast<std::uint32_t>(std::min<std::uint64_t>(
++                current_[static_cast<unsigned>(Stage::frame_work)], 0xffffffffULL));
++            if (current_seen_[static_cast<unsigned>(Stage::tick_only)]) {
++                samples_[static_cast<unsigned>(Stage::tick_only)].push_back(
++                    static_cast<std::uint32_t>(current_[static_cast<unsigned>(Stage::tick_only)]));
++                samples_[static_cast<unsigned>(Stage::work_tick)].push_back(work);
++            } else {
++                samples_[static_cast<unsigned>(Stage::work_plain)].push_back(work);
++            }
++        }
+         ++frames_;
+         if (series_) {
+             const auto idx = [](Stage stage) { return static_cast<unsigned>(stage); };
+@@ -223,7 +237,7 @@ public:
+             "logic", "audio", "background", "world", "composite", "expand",
+             "effects", "update_texture", "render_texture", "render_present",
+             "present_total", "frame_work", "pacer_wait", "frame_interval",
+-            "tick_only", "rtx_lighting", "hdr_effect", "cpu_shadow", "overlay", "bg2", "bg2_calls"};
++            "tick_only", "rtx_lighting", "hdr_effect", "cpu_shadow", "overlay", "bg2", "bg2_calls", "filter_pass", "style_pass", "gpu_probe", "work_tick", "work_plain"};
+         out << "profile-frames=" << frames_ << " vsync=" << (vsync ? 1 : 0) << '\n';
+         char line[192];
+         for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
+diff --git a/include/starfox/render/framebuffer.hpp b/include/starfox/render/framebuffer.hpp
+index 2dd1177..722e00c 100644
+--- a/include/starfox/render/framebuffer.hpp
++++ b/include/starfox/render/framebuffer.hpp
+@@ -62,6 +62,8 @@ public:
+     void end_write_coverage() noexcept {track_coverage_=false;}
+     [[nodiscard]] bool tracks_write_coverage() const noexcept {return track_coverage_;}
+     [[nodiscard]] std::span<const std::uint8_t> write_coverage() const noexcept {return coverage_;}
++    // Row-wise writers that set coverage themselves (see mark_written).
++    [[nodiscard]] std::uint8_t* write_coverage_data() noexcept {return coverage_.data();}
+     // Bulk pixel writers must mark coverage too; colour comparison cannot
+     // detect black or same-colour foreground writes.
+     void mark_written(std::size_t first,std::size_t count=1) noexcept {
+diff --git a/include/starfox/render/hdr_effect.hpp b/include/starfox/render/hdr_effect.hpp
+index 27733e5..3143a76 100644
+--- a/include/starfox/render/hdr_effect.hpp
++++ b/include/starfox/render/hdr_effect.hpp
+@@ -3,6 +3,10 @@
+ #include "starfox/render/row_workers.hpp"
+ #include <array>
+ #include <cmath>
++#include <cstring>
++#if defined(__ARM_NEON)
++#include <arm_neon.h>
++#endif
+ 
+ namespace starfox::render {
+ // SDR brightness/contrast styling only: does not request an HDR swapchain,
+@@ -27,7 +31,35 @@ inline void apply_hdr_effect(const Framebuffer& frame,
+     const std::size_t width=frame.stored_width();
+     const auto rows=frame.stored_height();
+     const auto band=[&](std::uint32_t first,std::uint32_t last) {
+-        for (std::size_t pixel=std::size_t(first)*width;pixel<std::size_t(last)*width;++pixel) {
++        std::size_t pixel=std::size_t(first)*width;
++        const std::size_t end=std::size_t(last)*width;
++#if defined(__ARM_NEON)
++        // Four pixels per step: the 256-entry curve is four 64-byte table
++        // lookups (out-of-range lanes read 0, so the four results OR together),
++        // applied to R, G and B only; alpha and 2D-layer pixels keep their bytes.
++        const uint8x16x4_t table0{{vld1q_u8(curve.data()),vld1q_u8(curve.data()+16),vld1q_u8(curve.data()+32),vld1q_u8(curve.data()+48)}};
++        const uint8x16x4_t table1{{vld1q_u8(curve.data()+64),vld1q_u8(curve.data()+80),vld1q_u8(curve.data()+96),vld1q_u8(curve.data()+112)}};
++        const uint8x16x4_t table2{{vld1q_u8(curve.data()+128),vld1q_u8(curve.data()+144),vld1q_u8(curve.data()+160),vld1q_u8(curve.data()+176)}};
++        const uint8x16x4_t table3{{vld1q_u8(curve.data()+192),vld1q_u8(curve.data()+208),vld1q_u8(curve.data()+224),vld1q_u8(curve.data()+240)}};
++        static constexpr std::uint8_t spread_bytes[16]={0,0,0,255,1,1,1,255,2,2,2,255,3,3,3,255};
++        const auto spread=vld1q_u8(spread_bytes);
++        const auto two_d=vdup_n_u8(static_cast<std::uint8_t>(PixelLayer::two_d));
++        const auto sixty_four=vdupq_n_u8(64),one_twenty_eight=vdupq_n_u8(128),one_ninety_two=vdupq_n_u8(192);
++        for (;pixel+4<=end;pixel+=4) {
++            std::uint32_t packed_tags;
++            std::memcpy(&packed_tags,tags.data()+pixel,4);
++            // 0xFF for each pixel that is not a 2D-layer pixel, spread over its RGB lanes.
++            const auto apply=vmvn_u8(vceq_u8(vreinterpret_u8_u32(vdup_n_u32(packed_tags)),two_d));
++            const auto lane_mask=vqtbl1q_u8(vcombine_u8(apply,apply),spread);
++            const auto source=vld1q_u8(rgba.data()+pixel*4);
++            const auto lut=vorrq_u8(vorrq_u8(vqtbl4q_u8(table0,source),
++                    vqtbl4q_u8(table1,vsubq_u8(source,sixty_four))),
++                vorrq_u8(vqtbl4q_u8(table2,vsubq_u8(source,one_twenty_eight)),
++                    vqtbl4q_u8(table3,vsubq_u8(source,one_ninety_two))));
++            vst1q_u8(rgba.data()+pixel*4,vbslq_u8(lane_mask,lut,source));
++        }
++#endif
++        for (;pixel<end;++pixel) {
+             if (tags[pixel]==static_cast<std::uint8_t>(PixelLayer::two_d)) continue;
+             for (unsigned channel=0;channel<3;++channel)
+                 rgba[pixel*4+channel]=curve[rgba[pixel*4+channel]];
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 20f0961..986a3ea 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -1926,10 +1926,13 @@ public:
+         }();
+         starfox::render::GpuEffectSettings filter_gpu;
+         filter_gpu.filter=static_cast<unsigned>(two_d_filter_);filter_gpu.highlight_filter=highlight_filtered;
++        const auto profile_filter_begin = std::chrono::steady_clock::now();
+         if (!apply_gpu_effects(framebuffer,filter_gpu))
+             starfox::render::apply_two_d_filter(
+                 two_d_filter_, framebuffer, palette, rgba_, pixel_filter_scratch_,
+                 presentation_workers_, highlight_filtered);
++        starfox::app::FrameProfile::get().add(starfox::app::Stage::filter_pass,
++            profile_filter_begin, std::chrono::steady_clock::now());
+         // Presentation effects address the source raster. Apply each one to
+         // every stored pixel the render scale expanded that raster cell into.
+         const auto render_scale = framebuffer.draw_scale();
+@@ -2529,6 +2532,7 @@ public:
+             // once in the uploaded style pass and then a second time below.
+             style_gpu.setup_overlay.reset();style_gpu.touch_controls=false;
+         }
++        const auto profile_style_begin = std::chrono::steady_clock::now();
+         if (!apply_gpu_effects(framebuffer,style_gpu)) {
+             starfox::render::smooth_models(model_smoothing_, framebuffer, rgba_, smoothing_scratch_, &presentation_workers_);
+             starfox::render::apply_effect(effect_, framebuffer, rgba_, style_scratch_, effect_intensity_,
+@@ -2540,6 +2544,8 @@ public:
+             apply_fxaa(anti_aliasing_);
+         }
+         }
++        starfox::app::FrameProfile::get().add(starfox::app::Stage::style_pass,
++            profile_style_begin, std::chrono::steady_clock::now());
+         if (effects.setup_overlay) {
+             const auto& overlay = *effects.setup_overlay;
+             const auto origin = (framebuffer.width() - 256U) / 2U;
+@@ -2736,6 +2742,7 @@ private:
+     }
+     bool run_gpu_effects(const starfox::render::Framebuffer& frame,std::vector<std::uint8_t>& pixels,
+         const starfox::render::GpuEffectSettings& settings) {
++        const starfox::app::ScopedStage profile_probe{starfox::app::Stage::gpu_probe};
+         SDL_FlushRenderer(renderer_);
+         const bool ok=portable_gpu_?sdl_gpu_effects_.apply(effect_device(),frame,pixels,settings)
+             :gpu_effects_.apply(effect_device(),frame,pixels,settings);
+diff --git a/src/render/framebuffer.cpp b/src/render/framebuffer.cpp
+index f45f112..5551164 100644
+--- a/src/render/framebuffer.cpp
++++ b/src/render/framebuffer.cpp
+@@ -2,6 +2,10 @@
+ #include "starfox/render/palette.hpp"
+ 
+ #include <array>
++#include <type_traits>
++#if defined(__ARM_NEON)
++#include <arm_neon.h>
++#endif
+ #include <fstream>
+ #include <stdexcept>
+ 
+@@ -96,29 +100,73 @@ void composite_transparent_layer(const Framebuffer& source,
+             && source_tags.size() == source_pixels.size();
+         constexpr auto geometry_tag =
+             static_cast<std::uint8_t>(PixelLayer::three_d);
+-        for (auto y = stored_source_top; y < stored_source_bottom; ++y) {
+-            auto source_index = y * source.stored_width()
+-                + stored_source_left;
+-            auto destination_index = static_cast<std::size_t>(
+-                static_cast<std::int64_t>(y) + stored_offset_y)
+-                    * destination.stored_width()
+-                + static_cast<std::size_t>(
+-                    static_cast<std::int64_t>(stored_source_left)
+-                        + stored_offset_x);
+-            for (auto x = stored_source_left; x < stored_source_right; ++x) {
+-                const auto colour = source_pixels[source_index];
+-                if (colour != 0U) {
+-                    destination_pixels[destination_index] = colour;
+-                    destination.mark_written(destination_index);
+-                    if (transfer_tags) {
+-                        destination_tags[destination_index] = source_tagged
+-                            ? source_tags[source_index] : geometry_tag;
++        const auto count = stored_source_right - stored_source_left;
++        const auto track_coverage = destination.tracks_write_coverage();
++        auto* coverage = track_coverage ? destination.write_coverage_data() : nullptr;
++        // Each row is a straight run of independent pixels, so write it as a
++        // select (colour 0 keeps the destination) rather than a branch per
++        // pixel; the compiler turns this into wide vector blends. Variants are
++        // fixed per call so the inner loops carry no flag tests.
++        const auto composite_rows = [&](auto tags_on, auto source_tagged_on, auto coverage_on) {
++            for (auto y = stored_source_top; y < stored_source_bottom; ++y) {
++                const auto source_index = y * source.stored_width()
++                    + stored_source_left;
++                const auto destination_index = static_cast<std::size_t>(
++                    static_cast<std::int64_t>(y) + stored_offset_y)
++                        * destination.stored_width()
++                    + static_cast<std::size_t>(
++                        static_cast<std::int64_t>(stored_source_left)
++                            + stored_offset_x);
++                const std::uint8_t* s = source_pixels.data() + source_index;
++                std::uint8_t* d = destination_pixels.data() + destination_index;
++                std::uint8_t* t = nullptr;
++                const std::uint8_t* st = nullptr;
++                std::uint8_t* c = nullptr;
++                if constexpr (decltype(tags_on)::value) {
++                    t = destination_tags.data() + destination_index;
++                    if constexpr (decltype(source_tagged_on)::value) {
++                        st = source_tags.data() + source_index;
+                     }
+                 }
+-                ++source_index;
+-                ++destination_index;
++                if constexpr (decltype(coverage_on)::value) c = coverage + destination_index;
++                std::size_t i = 0;
++#if defined(__ARM_NEON)
++                // 16 pixels per step: a lane is "written" when its source
++                // colour is non-zero; every array takes a bitwise select.
++                const auto geometry = vdupq_n_u8(geometry_tag);
++                const auto one = vdupq_n_u8(1U);
++                for (; i + 16U <= count; i += 16U) {
++                    const auto source_v = vld1q_u8(s + i);
++                    const auto written = vtstq_u8(source_v, source_v);
++                    vst1q_u8(d + i, vbslq_u8(written, source_v, vld1q_u8(d + i)));
++                    if constexpr (decltype(tags_on)::value) {
++                        const auto tag_v = decltype(source_tagged_on)::value ? vld1q_u8(st + i) : geometry;
++                        vst1q_u8(t + i, vbslq_u8(written, tag_v, vld1q_u8(t + i)));
++                    }
++                    if constexpr (decltype(coverage_on)::value) {
++                        vst1q_u8(c + i, vbslq_u8(written, one, vld1q_u8(c + i)));
++                    }
++                }
++#endif
++                for (; i < count; ++i) {
++                    if (s[i] == 0U) continue;
++                    d[i] = s[i];
++                    if constexpr (decltype(tags_on)::value) {
++                        t[i] = decltype(source_tagged_on)::value ? st[i] : geometry_tag;
++                    }
++                    if constexpr (decltype(coverage_on)::value) c[i] = 1U;
++                }
+             }
+-        }
++        };
++        using yes = std::true_type;
++        using no = std::false_type;
++        const auto with_coverage = [&](auto tags_on, auto source_tagged_on) {
++            if (track_coverage) composite_rows(tags_on, source_tagged_on, yes{});
++            else composite_rows(tags_on, source_tagged_on, no{});
++        };
++        if (!transfer_tags) with_coverage(no{}, no{});
++        else if (source_tagged) with_coverage(yes{}, yes{});
++        else with_coverage(yes{}, no{});
+         return;
+     }
+     for (std::uint32_t y = 0; y < source.height(); ++y) {
