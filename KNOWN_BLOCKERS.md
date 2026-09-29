@@ -42,14 +42,17 @@ reported by someone else, or not yet reproduced here, is labelled as such.
 - The remaining bottleneck is predominantly single-thread CPU: one core sits
   at ~100% while the other three are largely idle; CPU was at its max
   1512 MHz with no thermal throttling (~60 C).
-- Repeatable benchmark (`scripts/bench-rg40xx.sh`, 2026-09-22, PGO build,
-  real PipeWire/ALSA audio, Corneria flight from a save state, 900 frames,
-  3 runs): 59.5-59.9 FPS avg, render median ~10 ms, p99 ~17 ms; stage
-  times background ~2.7 ms, world ~1.4 ms, composite ~1.0 ms, present
-  ~5.8 ms; no core above ~65%. Unpaced (`BENCH_UNPACED=1`) gives the same
-  16.7 ms, so this scene is capped by the display's 60 Hz buffer swap, not
-  the CPU. The 42-44 FPS figure above is not reproduced in this scene; the
-  heavier scenes it came from still need a benchmark state.
+- SUPERSEDED (2026-09-22 idle-state benchmark): the earlier "59.5-59.9 FPS,
+  render median ~10 ms" result timed only the render half of the frame in a
+  light state. It missed that every third frame also runs the 20 Hz logic tick
+  and the audio render on the game thread, which is what pushed heavier scenes
+  to ~50 FPS with p95 ~32 ms.
+- 2026-09-29 work, all measured on the device with byte-identical output:
+  see `PERFORMANCE.md` (profile, patches 0003-0012, verification method,
+  results table). The world rasterizer is ~1 ms/frame and was not the
+  bottleneck; the tick, audio render, BG2 background and CPU presentation
+  passes were. Heavy Corneria states went from ~50 to ~59.7 FPS, p95 frame
+  32 -> ~17 ms.
 - Optimize measured hot paths (profile on the device) rather than applying
   random compiler flags. Not acceptable as "fixes": frame skipping, lowering
   the simulation rate, changing gameplay timing, resolution below 640x480,

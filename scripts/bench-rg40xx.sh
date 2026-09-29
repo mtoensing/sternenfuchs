@@ -92,7 +92,7 @@ one_run() {  # $1 frames; PRESSES/ACTIONS in env
   [ -n "${BENCH_PC:-}" ] && export STARFOX_TRACE_PC=1 STARFOX_TRACE_PC_FILE=/tmp/starfox-pc.txt
   STARFOX_TEST_FRAMES="$1" STARFOX_TRACE_PROFILE=1 \
     STARFOX_TEST_PROFILE_WARMUP="$BENCH_WARMUP" \
-    timeout 900 "./$BENCH_BINARY" 2>&1 | grep -E '^(profile-|parallel-verify|audio-frame|frame-hash|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
+    timeout 900 "./$BENCH_BINARY" 2>&1 | grep -E '^(profile-|parallel-verify|audio-frame|frame-hash|rgba-hash|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
 }
 
 case "$CMD" in
@@ -150,6 +150,7 @@ verify)
   one_run $((frames + BENCH_WARMUP)) > /tmp/verify.out
   echo "frames hashed: $(grep -c '^frame-hash' /tmp/verify.out)  audio ticks: $(grep -c '^audio-frame' /tmp/verify.out)"
   echo "video digest: $(grep '^frame-hash' /tmp/verify.out | md5sum | cut -c1-16)"
+  echo "rgba digest: $(grep '^rgba-hash' /tmp/verify.out | md5sum | cut -c1-16)"
   echo "audio digest: $(grep '^audio-frame' /tmp/verify.out | md5sum | cut -c1-16)"
   ;;
 *) echo "unknown command $CMD"; exit 1 ;;
