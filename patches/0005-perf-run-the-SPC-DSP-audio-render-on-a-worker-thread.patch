@@ -1,0 +1,340 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 17:14:30 +0200
+Subject: [PATCH] perf: run the SPC/DSP audio render on a worker thread, hand
+ its APU ports to the cartridge before the next tick
+
+Also adds STARFOX_TRACE_FRAME_HASH (per-frame FNV digest of the indexed
+framebuffer, for byte-exact regression checks) and rtx/hdr profile stages.
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+index 163c362..badc144 100644
+--- a/include/starfox/app/frame_profile.hpp
++++ b/include/starfox/app/frame_profile.hpp
+@@ -47,6 +47,8 @@ enum class Stage : unsigned {
+     pacer_wait,    // sleep in the presentation pacer
+     frame_interval,// pacer return -> next pacer return (wall time per frame)
+     tick_only,     // game.tick duration, recorded on tick frames only
++    rtx_lighting,  // CPU RTX lighting pass (inside effects)
++    hdr_effect,    // CPU HDR curve pass (inside effects)
+     count
+ };
+ 
+@@ -217,7 +219,7 @@ public:
+             "logic", "audio", "background", "world", "composite", "expand",
+             "effects", "update_texture", "render_texture", "render_present",
+             "present_total", "frame_work", "pacer_wait", "frame_interval",
+-            "tick_only"};
++            "tick_only", "rtx_lighting", "hdr_effect"};
+         out << "profile-frames=" << frames_ << " vsync=" << (vsync ? 1 : 0) << '\n';
+         char line[192];
+         for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index c809533..84303e3 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -63,6 +63,9 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <condition_variable>
++#include <exception>
++#include <mutex>
+ #include <array>
+ #include <bit>
+ #include <cctype>
+@@ -2331,8 +2334,14 @@ public:
+         }
+         const bool early_on_gpu=apply_gpu_effects(framebuffer,early_gpu);
+         if (!early_on_gpu) {
+-            if (rtx_lighting_) apply_rtx_lighting(framebuffer,effects);
+-            starfox::render::apply_hdr_effect(framebuffer,rgba_,effects.hdr_effect);
++            if (rtx_lighting_) {
++                const starfox::app::ScopedStage profile_rtx{starfox::app::Stage::rtx_lighting};
++                apply_rtx_lighting(framebuffer,effects);
++            }
++            {
++                const starfox::app::ScopedStage profile_hdr{starfox::app::Stage::hdr_effect};
++                starfox::render::apply_hdr_effect(framebuffer,rgba_,effects.hdr_effect);
++            }
+             starfox::render::apply_chromatic_aberration(framebuffer, rgba_,
+                 chromatic_scratch_, effects.chromatic_aberration);
+         }
+@@ -3776,7 +3785,10 @@ public:
+         }
+     }
+ 
+-    ~AudioOutput() { SDL_DestroyAudioStream(stream_); }
++    ~AudioOutput() {
++        stop_worker();
++        SDL_DestroyAudioStream(stream_);
++    }
+     AudioOutput(const AudioOutput&) = delete;
+     AudioOutput& operator=(const AudioOutput&) = delete;
+ 
+@@ -3787,12 +3799,14 @@ public:
+         std::uint32_t phase{}, speed{};
+     };
+     std::vector<std::uint8_t> save_state() const {
++        wait_idle();
+         starfox::state::Writer out;
+         out(emulator_.save_state(), msu1_.save_state(), music_volume_, sfx_volume_,
+             fast_sample_phase_, previous_speed_multiplier_);
+         return out.bytes();
+     }
+     PreparedState prepare_state(std::span<const std::uint8_t> bytes) const {
++        wait_idle();
+         PreparedState result;
+         std::vector<std::uint8_t> spc, msu;
+         starfox::state::Reader in{bytes};
+@@ -3809,6 +3823,7 @@ public:
+         return result;
+     }
+     void commit_state(PreparedState&& state) {
++        wait_idle();
+         // No emulator state changes until the old playback queue is discarded.
+         if (!SDL_ClearAudioStream(stream_)) throw std::runtime_error{SDL_GetError()};
+         emulator_ = std::move(state.emulator);
+@@ -3859,26 +3874,123 @@ public:
+     }
+ 
+     void set_msu1_enabled(bool enabled) noexcept {
++        wait_idle();
+         msu1_.set_enabled(enabled);
+     }
+     void set_volumes(std::uint8_t music, std::uint8_t effects) noexcept {
++        wait_idle();
+         music_volume_ = std::min<std::uint8_t>(music, 100U);
+         sfx_volume_ = std::min<std::uint8_t>(effects, 100U);
+     }
+     void set_game_paused(bool paused) noexcept {
++        wait_idle();
+         msu1_.set_paused(paused);
+     }
+     [[nodiscard]] std::uint16_t msu1_track() const noexcept {
++        wait_idle();
+         return msu1_.selected_track();
+     }
+     [[nodiscard]] bool msu1_playing() const noexcept {
++        wait_idle();
+         return msu1_.playing();
+     }
+ 
++    // Runs queue_logic_tick on a worker thread. The SPC/DSP render of one
++    // 50 ms logic tick is the single largest block on the game thread outside
++    // the tick itself, and its only product the game needs is the four APU
++    // output ports, which the cartridge next reads inside the following tick.
++    // collect_ports() therefore joins and hands the ports back right before
++    // that tick, so the game observes exactly the values the synchronous path
++    // would have produced. Anything else that touches the emulator waits first.
++    void submit_logic_tick(
++        std::span<const starfox::simulation::ApuPortWrite> writes,
++        std::span<const starfox::simulation::MsuRegisterWrite> msu_writes,
++        std::uint32_t speed_multiplier, bool queue_output) {
++        wait_idle();
++        job_writes_.assign(writes.begin(), writes.end());
++        job_msu_writes_.assign(msu_writes.begin(), msu_writes.end());
++        job_speed_ = speed_multiplier;
++        job_queue_output_ = queue_output;
++        if (!worker_.joinable()) {
++            worker_ = std::thread{[this] { worker_loop(); }};
++        }
++        {
++            const std::lock_guard<std::mutex> lock{job_mutex_};
++            job_pending_ = true;
++            job_result_ready_ = false;
++        }
++        job_cv_.notify_all();
++    }
++    // Joins any in-flight tick; returns true (and the ports) if one was
++    // submitted since the last call.
++    [[nodiscard]] bool collect_ports(std::array<std::uint8_t, 4>& ports) {
++        wait_idle();
++        std::unique_lock<std::mutex> lock{job_mutex_};
++        if (!job_result_ready_) return false;
++        job_result_ready_ = false;
++        ports = job_ports_;
++        if (job_error_) {
++            const auto error = job_error_;
++            job_error_ = nullptr;
++            lock.unlock();
++            std::rethrow_exception(error);
++        }
++        return true;
++    }
++
+     [[nodiscard]] std::array<std::uint8_t, 4> queue_logic_tick(
+         std::span<const starfox::simulation::ApuPortWrite> writes,
+         std::span<const starfox::simulation::MsuRegisterWrite> msu_writes,
+         std::uint32_t speed_multiplier, bool queue_output = true) {
++        wait_idle();
++        return queue_logic_tick_unlocked(writes, msu_writes, speed_multiplier, queue_output);
++    }
++
++private:
++    void wait_idle() const {
++        if (!worker_.joinable()) return;
++        std::unique_lock<std::mutex> lock{job_mutex_};
++        job_cv_.wait(lock, [this] { return !job_pending_; });
++    }
++    void stop_worker() {
++        if (!worker_.joinable()) return;
++        {
++            const std::lock_guard<std::mutex> lock{job_mutex_};
++            job_stop_ = true;
++        }
++        job_cv_.notify_all();
++        worker_.join();
++    }
++    void worker_loop() {
++        for (;;) {
++            {
++                std::unique_lock<std::mutex> lock{job_mutex_};
++                job_cv_.wait(lock, [this] { return job_pending_ || job_stop_; });
++                if (job_stop_ && !job_pending_) return;
++            }
++            std::array<std::uint8_t, 4> ports{};
++            std::exception_ptr error;
++            try {
++                ports = queue_logic_tick_unlocked(job_writes_, job_msu_writes_,
++                    job_speed_, job_queue_output_);
++            } catch (...) {
++                error = std::current_exception();
++            }
++            {
++                const std::lock_guard<std::mutex> lock{job_mutex_};
++                job_ports_ = ports;
++                job_error_ = error;
++                job_result_ready_ = true;
++                job_pending_ = false;
++            }
++            job_cv_.notify_all();
++        }
++    }
++
++    [[nodiscard]] std::array<std::uint8_t, 4> queue_logic_tick_unlocked(
++        std::span<const starfox::simulation::ApuPortWrite> writes,
++        std::span<const starfox::simulation::MsuRegisterWrite> msu_writes,
++        std::uint32_t speed_multiplier, bool queue_output) {
+         starfox::audio::render_mixed_tick(emulator_,msu1_,writes,msu_writes,
+             music_volume_,sfx_volume_,mixed_samples_);
+         auto& samples = mixed_samples_;
+@@ -3886,8 +3998,11 @@ public:
+             const auto bytes=std::span<const std::uint8_t>{
+                 reinterpret_cast<const std::uint8_t*>(samples.data()),samples.size()*sizeof(samples[0])};
+             const bool silent=std::all_of(samples.begin(),samples.end(),[](auto sample){return sample==0;});
+-            std::cerr<<"audio-frame: samples="<<samples.size()<<" crc="<<starfox::assets::crc32(bytes)
+-                <<" silent="<<silent<<" track="<<msu1_.selected_track()<<" msu-playing="<<msu1_.playing()<<'\n';
++            // One write call per line: this runs on the audio worker while the
++            // game thread prints its own trace lines.
++            std::fprintf(stderr,"audio-frame: samples=%zu crc=%u silent=%d track=%u msu-playing=%d\n",
++                samples.size(),static_cast<unsigned>(starfox::assets::crc32(bytes)),int(silent),
++                unsigned(msu1_.selected_track()),int(msu1_.playing()));
+         }
+         std::span<const std::int16_t> queued_samples{samples};
+         speed_multiplier = std::max(1U, speed_multiplier);
+@@ -3934,13 +4049,25 @@ public:
+         return emulator_.output_ports();
+     }
+ 
++public:
+     [[nodiscard]] std::array<std::uint8_t, 4> prime_upload_sequence(
+         std::span<const starfox::simulation::ApuPortWrite> writes) {
++        wait_idle();
+         static_cast<void>(emulator_.prime_upload_sequence(writes));
+         return emulator_.output_ports();
+     }
+ 
+ private:
++    std::thread worker_;
++    mutable std::mutex job_mutex_;
++    mutable std::condition_variable job_cv_;
++    bool job_pending_{}, job_result_ready_{}, job_stop_{};
++    std::vector<starfox::simulation::ApuPortWrite> job_writes_;
++    std::vector<starfox::simulation::MsuRegisterWrite> job_msu_writes_;
++    std::uint32_t job_speed_{1U};
++    bool job_queue_output_{true};
++    std::array<std::uint8_t, 4> job_ports_{};
++    std::exception_ptr job_error_;
+     const starfox::audio::Msu1Pack* pack_{};
+     starfox::audio::Spc700Audio emulator_;
+     starfox::audio::Msu1Audio msu1_;
+@@ -5813,6 +5940,14 @@ int main(int argc, char** argv) {
+         starfox::timing::LiveFpsCounter live_fps{
+             std::chrono::milliseconds{250}};
+         live_fps.reset(raster_timestamp, game.presentation_fps());
++        // The audio render runs on a worker (see AudioOutput::submit_logic_tick)
++        // and its APU output ports are handed to the cartridge here, before
++        // anything that reads or serialises game state.
++        const bool async_audio = std::getenv("STARFOX_SYNC_AUDIO") == nullptr;
++        const auto flush_audio = [&] {
++            std::array<std::uint8_t, 4> ports{};
++            if (audio.collect_ports(ports)) game.synchronize_apu_output_ports(ports);
++        };
+         while (running) {
+             if(test_frames && std::getenv("STARFOX_TEST_REVIVAL")
+                 && std::getenv("STARFOX_TEST_REVIVAL_FRAME")
+@@ -5872,6 +6007,7 @@ int main(int argc, char** argv) {
+                             state_navigation.reset(bindings.sample_gamepad_only(gamepad));
+                             input.reset();
+                         } else if (event.key.scancode == SDL_SCANCODE_F1) {
++                            flush_audio();
+                             starfox::state::Writer out;
+                             std::vector<std::array<std::uint32_t,3>> apu, msu;
+                             for (const auto& w : pending_audio_writes) apu.push_back({w.port,w.value,w.clock_offset});
+@@ -5883,6 +6019,7 @@ int main(int argc, char** argv) {
+                             window.show_temporary_status("SAVED SLOT " + std::to_string(state_slot));
+                             if (test_frames) std::cerr << "state saved slot=" << unsigned(state_slot) << '\n';
+                         } else {
++                            flush_audio();
+                             const auto bytes = starfox::state::read_file(state_slot_path());
+                             starfox::state::Reader in{starfox::state::unpack(bytes, 0x52554e01U, state_rom_crc)};
+                             std::vector<std::uint8_t> game_bytes, audio_bytes;
+@@ -6788,6 +6925,7 @@ int main(int argc, char** argv) {
+                         ?scripted_bomb_count():0;
+                     const bool runtime_options_were_open=game.runtime_options_open();
+                     const auto profile_tick_begin = std::chrono::steady_clock::now();
++                    flush_audio();
+                     starfox::app::mark_phase(1);
+                     const auto tick_result = game.tick(controls);
+                     starfox::app::mark_phase(0);
+@@ -6911,11 +7049,17 @@ int main(int argc, char** argv) {
+                 if (!game.runtime_options_open() && ++audio_video_phases >= 3U) {
+                     const auto profile_audio_begin = std::chrono::steady_clock::now();
+                     starfox::app::mark_phase(2);
+-                    game.synchronize_apu_output_ports(
+-                        audio.queue_logic_tick(
+-                            pending_audio_writes, pending_msu_writes,
+-                            speed_multiplier,
+-                            !advance_frozen_frame));
++                    if (async_audio) {
++                        audio.submit_logic_tick(pending_audio_writes,
++                            pending_msu_writes, speed_multiplier,
++                            !advance_frozen_frame);
++                    } else {
++                        game.synchronize_apu_output_ports(
++                            audio.queue_logic_tick(
++                                pending_audio_writes, pending_msu_writes,
++                                speed_multiplier,
++                                !advance_frozen_frame));
++                    }
+                     starfox::app::mark_phase(0);
+                     frame_profile.add(starfox::app::Stage::audio,
+                         profile_audio_begin, std::chrono::steady_clock::now());
+@@ -9672,6 +9816,16 @@ int main(int argc, char** argv) {
+                 presentation_effects.temporal_ground=starfox::render::TemporalGroundPlane{
+                     {float(normal.x),float(normal.y),float(normal.z),float(-(point.x*normal.x+point.y*normal.y+point.z*normal.z))},shadow_height};
+             }
++            if (test_frames != 0U && std::getenv("STARFOX_TRACE_FRAME_HASH") != nullptr) {
++                // Byte-exact regression check: FNV-1a over the finished indexed
++                // framebuffer (pixels and layer tags) of every presented frame.
++                std::uint64_t hash = 1469598103934665603ULL;
++                for (const auto byte : framebuffer.pixels()) hash = (hash ^ byte) * 1099511628211ULL;
++                for (const auto byte : framebuffer.layer_tags()) hash = (hash ^ byte) * 1099511628211ULL;
++                std::fprintf(stderr, "frame-hash %llu %016llx\n",
++                    static_cast<unsigned long long>(presented_frames),
++                    static_cast<unsigned long long>(hash));
++            }
+             const auto profile_present_begin = std::chrono::steady_clock::now();
+             starfox::app::mark_phase(6);
+             const bool stereo_presented=resident_raster && record_models && game.stereo_output()!=0U

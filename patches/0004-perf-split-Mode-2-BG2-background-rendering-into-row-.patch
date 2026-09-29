@@ -1,0 +1,123 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 17:02:10 +0200
+Subject: [PATCH] perf: split Mode 2 BG2 background rendering into row bands on
+ RowWorkers
+
+
+diff --git a/include/starfox/render/background_renderer.hpp b/include/starfox/render/background_renderer.hpp
+index d26dcf5..aace74d 100644
+--- a/include/starfox/render/background_renderer.hpp
++++ b/include/starfox/render/background_renderer.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "starfox/render/framebuffer.hpp"
++#include "starfox/render/row_workers.hpp"
+ #include "starfox/simulation/snes_ppu.hpp"
+ 
+ #include <cstdint>
+@@ -28,6 +29,9 @@ struct BackgroundUniqueRegion {
+ 
+ class BackgroundRenderer {
+ public:
++    // Optional pool used to split BG2 (the Mode 2 ground/sky, the costliest
++    // background pass) into row bands. Null renders on the calling thread.
++    RowWorkers* row_workers{nullptr};
+     void draw_bg1(
+         const simulation::SnesPpuState& ppu,
+         Framebuffer& target,
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index b28c99f..c809533 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -5559,6 +5559,11 @@ int main(int argc, char** argv) {
+         const starfox::render::ParticleRenderer particle_renderer;
+         starfox::render::ScaledTextRenderer text_renderer{rom, symbols};
+         RecordingBackgroundRenderer background_renderer;
++        starfox::render::RowWorkers background_workers;
++        // STARFOX_RENDER_THREADS=1 renders serially (A/B benchmark, debugging).
++        background_workers.set_worker_count(std::getenv("STARFOX_RENDER_THREADS")
++            ? static_cast<std::size_t>(std::atoi(std::getenv("STARFOX_RENDER_THREADS"))) : 0U);
++        background_renderer.row_workers = &background_workers;
+         const starfox::render::DustRenderer dust_renderer{rom, symbols};
+         const starfox::render::SpriteRenderer sprite_renderer;
+         const auto capture = [&game, &trigonometry]() {
+diff --git a/src/render/background_renderer.cpp b/src/render/background_renderer.cpp
+index 0100a9f..a55d977 100644
+--- a/src/render/background_renderer.cpp
++++ b/src/render/background_renderer.cpp
+@@ -1,5 +1,8 @@
+ #include "starfox/render/background_renderer.hpp"
+ 
++#include <cstdio>
++#include <cstdlib>
++
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
+@@ -427,6 +430,13 @@ void BackgroundRenderer::draw_bg2(
+         ground_source_wrapped.resize(final_x - first_x, false);
+     }
+ 
++    // Rows are independent: each reads only the immutable PPU snapshot and the
++    // per-column scroll table, and writes only its own framebuffer row. The
++    // sole cross-row state is the wide-mode ground continuation, so that (and
++    // command recording, which appends to a shared list) stays serial.
++    // Every slice owns its decode caches; they are pure functions of the PPU
++    // snapshot, so the output is identical to a single serial pass.
++    const auto render_rows = [&](std::uint32_t row_begin, std::uint32_t row_end) {
+     // Decode each referenced 8x8 character and tilemap entry once per pass.
+     // Wide Mode 2 otherwise reread four planar VRAM bytes and reconstructed
+     // the same nibble for every output pixel—well over 170,000 times per
+@@ -471,7 +481,7 @@ void BackgroundRenderer::draw_bg2(
+         }
+         return decoded_tilemap[index];
+     };
+-    for (std::uint32_t screen_y = 0; screen_y < target.height(); ++screen_y) {
++    for (std::uint32_t screen_y = row_begin; screen_y < row_end; ++screen_y) {
+         const auto sample_y = mosaic_coordinate(
+             static_cast<std::int32_t>(screen_y), ppu.mosaic, 0x02U);
+         const auto row_scroll_x = ppu.bg2_horizontal_offsets_enabled
+@@ -636,6 +646,41 @@ void BackgroundRenderer::draw_bg2(
+             }
+         }
+     }
++    };
++    if (row_workers != nullptr && !extend_ground_down
++        && target.command_buffer() == nullptr) {
++        // STARFOX_VERIFY_PARALLEL=1 draws every BG2 pass twice -- serially and
++        // in row bands, from the same starting framebuffer -- and reports any
++        // byte that differs (pixels or layer tags).
++        static const bool verify = std::getenv("STARFOX_VERIFY_PARALLEL") != nullptr;
++        if (verify) {
++            struct Tally {
++                std::uint64_t draws{}, mismatches{};
++                ~Tally() {
++                    std::fprintf(stderr, "parallel-verify bg2: draws=%llu mismatches=%llu\n",
++                        static_cast<unsigned long long>(draws),
++                        static_cast<unsigned long long>(mismatches));
++                }
++            };
++            static Tally tally;
++            const auto pixels_before = target.pixels();
++            const auto tags_before = target.layer_tags();
++            render_rows(0U, target.height());
++            const auto serial_pixels = target.pixels();
++            const auto serial_tags = target.layer_tags();
++            target.pixels() = pixels_before;
++            target.layer_tags() = tags_before;
++            row_workers->parallel_rows(target.height(), render_rows);
++            ++tally.draws;
++            if (target.pixels() != serial_pixels || target.layer_tags() != serial_tags) {
++                ++tally.mismatches;
++            }
++        } else {
++            row_workers->parallel_rows(target.height(), render_rows);
++        }
++    } else {
++        render_rows(0U, target.height());
++    }
+ }
+ 
+ void BackgroundRenderer::draw_bg3(

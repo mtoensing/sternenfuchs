@@ -11,11 +11,14 @@
 #       ($GAMEDIR/bench-states/NAME/).
 #   bench-rg40xx.sh run NAME [FRAMES] [RUNS]
 #       Load state NAME, run FRAMES frames (default 900) RUNS times (default 3).
+#   bench-rg40xx.sh verify NAME [FRAMES]
+#       Deterministic (unpaced) run printing a digest of every frame and of the
+#       audio stream, for byte-exact serial-vs-parallel comparisons.
 #   bench-rg40xx.sh explore FRAMES [PRESS_MODE]
 #       Boot and play through from the start, printing a per-second series of
 #       frame cost. Used to find heavy scenes worth saving as states.
 #
-# Env: BENCH_CFG=device|packaged, BENCH_PC=1 (also collect game-thread PC samples), RG40XX_HOST, RG40XX_USER, BENCH_UNPACED=1 (no 60 FPS pacer),
+# Env: BENCH_EXTRA="VAR=1 ...", BENCH_CFG=device|packaged, BENCH_PC=1 (also collect game-thread PC samples), RG40XX_HOST, RG40XX_USER, BENCH_UNPACED=1 (no 60 FPS pacer),
 #      BENCH_VSYNC=1, BENCH_WARMUP (default 60), BENCH_LOG_DIR (local copy).
 set -euo pipefail
 HOST="${RG40XX_HOST:-192.168.178.76}"
@@ -30,7 +33,7 @@ LOCAL_LOG="$LOG_DIR/$STAMP-$CMD-${1:-}.log"
 ssh "${USER}@${HOST}" "CMD=$(printf %q "$CMD") ARGS=$(printf %q "$*")" \
     "BENCH_UNPACED=$(printf %q "${BENCH_UNPACED:-0}") BENCH_VSYNC=$(printf %q "${BENCH_VSYNC:-0}")" \
     "BENCH_WARMUP=$(printf %q "${BENCH_WARMUP:-60}") BENCH_SERIES=$(printf %q "${BENCH_SERIES:-}")" \
-    "BENCH_PC=$(printf %q "${BENCH_PC:-}") BENCH_CFG=$(printf %q "${BENCH_CFG:-device}")" \
+    "BENCH_PC=$(printf %q "${BENCH_PC:-}") BENCH_CFG=$(printf %q "${BENCH_CFG:-device}") BENCH_EXTRA=$(printf %q "${BENCH_EXTRA:-}")" \
     bash -s <<'REMOTE' 2>&1 | tee "$LOCAL_LOG"
 set -u
 GAMEDIR="/userdata/roms/ports/sternenfuchs"
@@ -54,6 +57,8 @@ export STARFOX_TEST_RENDER_SCALE=1 STARFOX_TEST_PRESENTATION_FPS=60
 export STARFOX_TEST_VSYNC="$BENCH_VSYNC"
 [ "$BENCH_UNPACED" = 1 ] && export STARFOX_TEST_UNPACED=1
 export STARFOX_TEST_PRESS_FRAMES=30
+# BENCH_EXTRA="NAME=value NAME2=value" adds arbitrary environment variables.
+[ -n "$BENCH_EXTRA" ] && export $BENCH_EXTRA
 # BENCH_CFG=device (default) keeps whatever pregame.cfg the device has;
 # BENCH_CFG=packaged forces the shipped defaults for the expensive presentation
 # options (RTX lighting, HDR effect, FPS overlay all off).
@@ -87,7 +92,7 @@ one_run() {  # $1 frames; PRESSES/ACTIONS in env
   [ -n "${BENCH_PC:-}" ] && export STARFOX_TRACE_PC=1 STARFOX_TRACE_PC_FILE=/tmp/starfox-pc.txt
   STARFOX_TEST_FRAMES="$1" STARFOX_TRACE_PROFILE=1 \
     STARFOX_TEST_PROFILE_WARMUP="$BENCH_WARMUP" \
-    timeout 900 ./starfox.aarch64 2>&1 | grep -E '^(profile-|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
+    timeout 900 ./starfox.aarch64 2>&1 | grep -E '^(profile-|parallel-verify|audio-frame|frame-hash|state saved|state loaded|render-|starfox_pc failed|.*[Ss]tate)'
 }
 
 case "$CMD" in
@@ -122,6 +127,22 @@ run)
       [ -n "${BENCH_SERIES:-}" ] && export STARFOX_TRACE_PROFILE_SERIES=1
     one_run $((frames + BENCH_WARMUP))
   done
+  ;;
+verify)
+  # Byte-exact regression check. Unpaced runs advance the simulation per
+  # presented frame, so they are deterministic; the printed digest covers the
+  # framebuffer of every frame plus the audio stream. Compare digests between
+  # builds/settings (BENCH_EXTRA="STARFOX_RENDER_THREADS=1 STARFOX_SYNC_AUDIO=1"
+  # is the serial reference).
+  name=$1 frames=${2:-600}
+  base_env "$STATES/$name"
+  read -r save_frame save_mode < "$STATES/$name/meta" 2>/dev/null || { save_frame=1400; save_mode=fire; }
+  export STARFOX_TEST_UNPACED=1 STARFOX_TEST_PRESSES="$(play_presses 10 $((frames + BENCH_WARMUP + 10)) "$save_mode" $(( (save_frame - 1400) / 30 )))"
+  export STARFOX_TEST_STATE_ACTIONS="5:2" STARFOX_TRACE_FRAME_HASH=1 STARFOX_TEST_AUDIO_SIGNATURES=1
+  one_run $((frames + BENCH_WARMUP)) > /tmp/verify.out
+  echo "frames hashed: $(grep -c '^frame-hash' /tmp/verify.out)  audio ticks: $(grep -c '^audio-frame' /tmp/verify.out)"
+  echo "video digest: $(grep '^frame-hash' /tmp/verify.out | md5sum | cut -c1-16)"
+  echo "audio digest: $(grep '^audio-frame' /tmp/verify.out | md5sum | cut -c1-16)"
   ;;
 *) echo "unknown command $CMD"; exit 1 ;;
 esac
