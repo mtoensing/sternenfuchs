@@ -1,0 +1,81 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 18:09:51 +0200
+Subject: [PATCH] perf: bulk extended-record unpack in the object sync
+
+
+diff --git a/include/starfox/simulation/object_pool.hpp b/include/starfox/simulation/object_pool.hpp
+index 18b5ff4..ddfbb0d 100644
+--- a/include/starfox/simulation/object_pool.hpp
++++ b/include/starfox/simulation/object_pool.hpp
+@@ -99,6 +99,8 @@ public:
+     // the byte accessors, without a field lookup per byte.
+     void pack_base_bytes(ObjectHandle handle, std::uint16_t first, std::uint16_t last, std::uint8_t* out) const;
+     void unpack_base_bytes(ObjectHandle handle, std::uint16_t first, std::uint16_t last, const std::uint8_t* in);
++    // Equivalent to write_path_byte(handle, 0x80 + i, in[i]) for i in [0, count).
++    void unpack_extended_bytes(ObjectHandle handle, const std::uint8_t* in, std::size_t count);
+     void write_base_word(ObjectHandle handle, std::uint16_t offset, std::uint16_t value);
+     void write_base_long(ObjectHandle handle, std::uint16_t offset, std::uint32_t value);
+     [[nodiscard]] std::uint8_t read_path_byte(ObjectHandle handle, std::uint8_t encoded_offset) const;
+diff --git a/src/simulation/map_vm.cpp b/src/simulation/map_vm.cpp
+index 7233265..7643a35 100644
+--- a/src/simulation/map_vm.cpp
++++ b/src/simulation/map_vm.cpp
+@@ -766,10 +766,7 @@ void MapVm::sync_objects_from_cpu() {
+                 extended_image[offset] = cpu_.read8(extended_base + offset);
+             }
+         }
+-        for (std::size_t offset = 0; offset < extended_object_bytes_; ++offset) {
+-            objects_->write_path_byte(handle, static_cast<std::uint8_t>(0x80U + offset),
+-                                      extended_image[offset]);
+-        }
++        objects_->unpack_extended_bytes(handle, extended_image.data(), extended_object_bytes_);
+         object.fire_object = object_handle(cpu_.read16(extended_base + 19U));
+     }
+ }
+diff --git a/src/simulation/object_pool.cpp b/src/simulation/object_pool.cpp
+index 8210c4b..0521410 100644
+--- a/src/simulation/object_pool.cpp
++++ b/src/simulation/object_pool.cpp
+@@ -498,6 +498,41 @@ std::uint16_t ObjectPool::read_path_word(
+            << 8U);
+ }
+ 
++void ObjectPool::unpack_extended_bytes(
++    ObjectHandle handle, const std::uint8_t* in, std::size_t count) {
++    if (count > kExtendedObjectBytes) {
++        throw std::out_of_range{"extended alien-block byte offset is outside alx_size"};
++    }
++    // Same statements, in the same order, as `count` calls to write_path_byte
++    // with encoded offsets 0x80.. -- minus the per-byte handle lookup.
++    auto& object = at(handle);
++    const auto ex_shift = layout_ == ObjectMemoryLayout::starfox_ex
++        ? std::size_t{2U} : std::size_t{};
++    for (std::size_t index = 0; index < count; ++index) {
++        const auto value = in[index];
++        object.extended[index] = value;
++        if (index == 18) object.strategy_state = value;
++        if (index >= 19 && index <= 20) {
++            const auto bits = static_cast<std::uint16_t>(object.fire_object);
++            const auto shift = static_cast<unsigned>((index - 19U) * 8U);
++            object.fire_object = static_cast<ObjectHandle>(
++                (bits & ~(std::uint16_t{0xff} << shift)) | (std::uint16_t{value} << shift));
++        }
++        if (index == 28U + ex_shift) object.colour_frame = value;
++        if (index == 29U + ex_shift) object.animation_frame = value;
++        if (index == 30U + ex_shift) object.sound1 = value;
++        if (index == 31U + ex_shift) object.sound2 = value;
++        if (index >= 32U + ex_shift && index <= 33U + ex_shift) {
++            const auto shift = static_cast<unsigned>((index - (32U + ex_shift)) * 8U);
++            object.colour_table = static_cast<std::uint16_t>(
++                (object.colour_table & ~(std::uint16_t{0xff} << shift))
++                | (std::uint16_t{value} << shift));
++        }
++        if (index == 42U + ex_shift) object.texture_scroll_x = value;
++        if (index == 43U + ex_shift) object.texture_scroll_y = value;
++    }
++}
++
+ void ObjectPool::write_path_byte(
+     ObjectHandle handle, std::uint8_t encoded_offset, std::uint8_t value) {
+     if ((encoded_offset & 0x80U) == 0) {
