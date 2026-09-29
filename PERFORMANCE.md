@@ -108,6 +108,8 @@ warm-up), and a state carries its own settings.
 
 ## Results
 
+59.7 is the ceiling of the pacer (1000/16.75 ms); the remaining p99 excess is a rare tick frame that still runs slightly over one refresh.
+
 Frame interval statistics over 900 presented frames, 3 runs each, real audio,
 paced (the FPS column is the mean of the runs).
 
@@ -122,7 +124,9 @@ paced (the FPS column is the mean of the runs).
 | + object sync, BG2 fast path (0010-0011) | heavy | 59.7 | 17.3 ms | 19.8 ms | |
 | + object sync, BG2 fast path (0010-0011) | heavy_pkg | 59.8 | 17.2 ms | 18.7 ms | |
 | + object sync, BG2 fast path (0010-0011) | w1800 | 59.7 | 18.0 ms | 19.7 ms | |
-| final (PGO retrained) | see below | | | | |
+| **final (PGO retrained on the new code)** | heavy | **59.7** | **17.2 ms** | **18.9 ms** | RTX + HDR + FPS overlay on |
+| **final** | heavy_pkg | **59.7** | **17.1 ms** | **17.7 ms** | packaged defaults |
+| **final** | w1800 | **59.7** | **17.7 ms** | **19.7 ms** | |
 
 The 32-45 FPS reported from hand play was not reproduced by any scripted
 state; the scripted heavy states reproduce the same mechanism (tick frames
