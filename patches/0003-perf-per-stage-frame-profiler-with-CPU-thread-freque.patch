@@ -1,0 +1,617 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marc=20T=C3=B6nsing?= <mtoensing@users.noreply.github.com>
+Date: Tue, 29 Sep 2026 16:57:59 +0200
+Subject: [PATCH] perf: per-stage frame profiler with CPU/thread/frequency
+ report and PC sampler
+
+
+diff --git a/include/starfox/app/frame_profile.hpp b/include/starfox/app/frame_profile.hpp
+new file mode 100644
+index 0000000..163c362
+--- /dev/null
++++ b/include/starfox/app/frame_profile.hpp
+@@ -0,0 +1,393 @@
++#pragma once
++
++// Per-stage frame profiler for device benchmarking. Inactive (one relaxed
++// branch per stage) unless STARFOX_TRACE_PROFILE is set and the warm-up frames
++// have passed, so it is safe to leave in the normal binary.
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <iostream>
++#include <map>
++#include <sstream>
++#include <string>
++#include <vector>
++
++#if defined(__linux__)
++#include <atomic>
++#include <csignal>
++#include <ctime>
++#include <dirent.h>
++#include <dlfcn.h>
++#include <sys/syscall.h>
++#include <ucontext.h>
++#include <unistd.h>
++#endif
++
++namespace starfox::app {
++
++enum class Stage : unsigned {
++    logic,         // game.tick + host bookkeeping, per frame (0 on non-tick frames)
++    audio,         // audio.queue_logic_tick
++    background,    // frame start -> background layers done
++    world,         // world / software rasterizer + shadows
++    composite,     // layer composition into the indexed framebuffer
++    expand,        // indexed/palette -> RGBA
++    effects,       // 2D filter / smoothing / bloom / AA / overlays (CPU, pre-upload)
++    update_texture,// SDL_UpdateTexture
++    render_texture,// SDL_SetRenderDrawColor + SDL_RenderClear + SDL_RenderTexture
++    render_present,// SDL_RenderPresent
++    present_total, // window.present / present_native as a whole
++    frame_work,    // pacer return -> presented (all CPU work, no pacing sleep)
++    pacer_wait,    // sleep in the presentation pacer
++    frame_interval,// pacer return -> next pacer return (wall time per frame)
++    tick_only,     // game.tick duration, recorded on tick frames only
++    count
++};
++
++#if defined(__linux__) && defined(__aarch64__)
++// Statistical program-counter sampler for the game thread (STARFOX_TRACE_PC=1).
++// A CPU-time timer signals the calling thread at ~1 kHz; the handler stores the
++// interrupted PC and the current phase marker. Resolve offline against the
++// binary's symbol table (see scripts/resolve-pc-samples.sh).
++class PcSampler {
++public:
++    static PcSampler& get() { static PcSampler instance; return instance; }
++    static void set_phase(int phase) noexcept { get().phase_.store(phase, std::memory_order_relaxed); }
++    void start() {
++        if (started_) return;
++        samples_.resize(1U << 20);
++        struct sigaction action{};
++        action.sa_sigaction = &PcSampler::handler;
++        action.sa_flags = SA_SIGINFO | SA_RESTART;
++        sigemptyset(&action.sa_mask);
++        sigaction(SIGRTMIN + 2, &action, nullptr);
++        sigevent event{};
++        event.sigev_notify = SIGEV_THREAD_ID;
++        event.sigev_signo = SIGRTMIN + 2;
++        event._sigev_un._tid = static_cast<int>(syscall(SYS_gettid));
++        clockid_t clock{};
++        pthread_getcpuclockid(pthread_self(), &clock);
++        if (timer_create(clock, &event, &timer_) != 0) return;
++        itimerspec spec{};
++        spec.it_interval.tv_nsec = 1'000'000;
++        spec.it_value.tv_nsec = 1'000'000;
++        timer_settime(timer_, 0, &spec, nullptr);
++        started_ = true;
++    }
++    void stop_and_dump(const char* path) {
++        if (!started_) return;
++        itimerspec off{};
++        timer_settime(timer_, 0, &off, nullptr);
++        started_ = false;
++        std::ofstream out{path};
++        const auto count = std::min<std::size_t>(count_.load(), samples_.size());
++        for (std::size_t i = 0; i < count; ++i) {
++            Dl_info info{};
++            const auto pc = reinterpret_cast<void*>(samples_[i].pc);
++            if (dladdr(pc, &info) && info.dli_fname) {
++                const char* base = std::strrchr(info.dli_fname, '/');
++                out << samples_[i].phase << ' ' << (base ? base + 1 : info.dli_fname) << ' '
++                    << std::hex << (samples_[i].pc - reinterpret_cast<std::uintptr_t>(info.dli_fbase))
++                    << ' ' << (info.dli_sname ? info.dli_sname : "-") << std::dec << '\n';
++            }
++        }
++    }
++private:
++    struct Sample { std::uintptr_t pc; int phase; };
++    static void handler(int, siginfo_t*, void* context) {
++        auto& self = get();
++        const auto index = self.count_.fetch_add(1, std::memory_order_relaxed);
++        if (index >= self.samples_.size()) return;
++        const auto* uc = static_cast<ucontext_t*>(context);
++        self.samples_[index] = {static_cast<std::uintptr_t>(uc->uc_mcontext.pc),
++            self.phase_.load(std::memory_order_relaxed)};
++    }
++    std::vector<Sample> samples_;
++    std::atomic<std::size_t> count_{0};
++    std::atomic<int> phase_{0};
++    timer_t timer_{};
++    bool started_{};
++};
++inline void mark_phase(int phase) noexcept { PcSampler::set_phase(phase); }
++#else
++struct PcSampler {
++    static PcSampler& get() { static PcSampler i; return i; }
++    void start() {}
++    void stop_and_dump(const char*) {}
++};
++inline void mark_phase(int) noexcept {}
++#endif
++
++class FrameProfile {
++public:
++    using Clock = std::chrono::steady_clock;
++
++    static FrameProfile& get() {
++        static FrameProfile instance;
++        return instance;
++    }
++
++    [[nodiscard]] bool enabled() const noexcept { return enabled_; }
++    [[nodiscard]] bool active() const noexcept { return active_; }
++
++    void configure(bool enabled, std::uint64_t warmup, std::uint64_t frames) {
++        enabled_ = enabled;
++        series_ = std::getenv("STARFOX_TRACE_PROFILE_SERIES") != nullptr;
++        warmup_ = warmup;
++        for (auto& samples : samples_) samples.reserve(frames);
++    }
++
++    // Called at the top of each loop iteration with the presented-frame count.
++    void begin_frame(std::uint64_t presented) {
++        const bool now_active = enabled_ && presented >= warmup_;
++        if (now_active && !active_) start_capture();
++        active_ = now_active;
++        current_.fill(0U);
++        current_seen_.fill(false);
++        if (active_ && presented % 30U == 0U) sample_frequency();
++    }
++
++    void add(Stage stage, Clock::time_point begin, Clock::time_point end) noexcept {
++        if (!active_) return;
++        add_ns(stage, static_cast<std::uint64_t>(
++            std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count()));
++    }
++    void add_ns(Stage stage, std::uint64_t ns) noexcept {
++        if (!active_) return;
++        const auto index = static_cast<unsigned>(stage);
++        current_[index] += ns;
++        current_seen_[index] = true;
++    }
++    // Store an interval measured by the caller as a complete sample.
++    void record(Stage stage, std::uint64_t ns) {
++        if (!active_) return;
++        samples_[static_cast<unsigned>(stage)].push_back(static_cast<std::uint32_t>(
++            std::min<std::uint64_t>(ns, 0xffffffffULL)));
++    }
++    void end_frame() {
++        if (!active_) return;
++        {
++            // Whatever present_total holds beyond the four measured SDL/convert
++            // stages is CPU-side filtering, effects and overlay work.
++            const auto idx = [](Stage stage) { return static_cast<unsigned>(stage); };
++            const auto measured = current_[idx(Stage::expand)] + current_[idx(Stage::update_texture)]
++                + current_[idx(Stage::render_texture)] + current_[idx(Stage::render_present)];
++            const auto total = current_[idx(Stage::present_total)];
++            current_[idx(Stage::effects)] = total > measured ? total - measured : 0U;
++        }
++        for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
++            const auto stage = static_cast<Stage>(i);
++            if (stage == Stage::frame_interval || stage == Stage::tick_only) continue;
++            // Stages that did not run this frame (e.g. no tick) still count as
++            // zero so per-frame means stay comparable with the frame budget.
++            samples_[i].push_back(static_cast<std::uint32_t>(
++                std::min<std::uint64_t>(current_[i], 0xffffffffULL)));
++        }
++        if (current_seen_[static_cast<unsigned>(Stage::tick_only)])
++            samples_[static_cast<unsigned>(Stage::tick_only)].push_back(
++                static_cast<std::uint32_t>(current_[static_cast<unsigned>(Stage::tick_only)]));
++        ++frames_;
++        if (series_) {
++            const auto idx = [](Stage stage) { return static_cast<unsigned>(stage); };
++            series_work_ += current_[idx(Stage::frame_work)];
++            series_world_ += current_[idx(Stage::world)];
++            series_bg_ += current_[idx(Stage::background)];
++            series_present_ += current_[idx(Stage::present_total)];
++            series_max_ = std::max(series_max_, current_[idx(Stage::frame_work)]);
++            if (frames_ % 60U == 0U) {
++                std::fprintf(stderr,
++                    "profile-series frame=%llu work=%.2fms max=%.2fms bg=%.2fms world=%.2fms present=%.2fms\n",
++                    static_cast<unsigned long long>(warmup_ + frames_), series_work_ / 60e6,
++                    series_max_ / 1e6, series_bg_ / 60e6, series_world_ / 60e6, series_present_ / 60e6);
++                series_work_ = series_world_ = series_bg_ = series_present_ = series_max_ = 0U;
++            }
++        }
++    }
++
++    void report(std::ostream& out, bool vsync) {
++        if (!enabled_ || frames_ == 0U) return;
++        const auto wall_end = Clock::now();
++        static constexpr const char* names[] = {
++            "logic", "audio", "background", "world", "composite", "expand",
++            "effects", "update_texture", "render_texture", "render_present",
++            "present_total", "frame_work", "pacer_wait", "frame_interval",
++            "tick_only"};
++        out << "profile-frames=" << frames_ << " vsync=" << (vsync ? 1 : 0) << '\n';
++        char line[192];
++        for (unsigned i = 0; i < static_cast<unsigned>(Stage::count); ++i) {
++            auto values = samples_[i];
++            if (values.empty()) continue;
++            std::sort(values.begin(), values.end());
++            double sum = 0.0;
++            for (const auto v : values) sum += v;
++            const auto pct = [&](std::size_t p) {
++                return values[(values.size() - 1U) * p / 100U] / 1000000.0;
++            };
++            std::snprintf(line, sizeof line,
++                "profile-stage %-15s n=%zu mean=%.2fms median=%.2fms p95=%.2fms p99=%.2fms max=%.2fms",
++                names[i], values.size(), sum / values.size() / 1000000.0,
++                pct(50), pct(95), pct(99),
++                values.back() / 1000000.0);
++            out << line << '\n';
++        }
++        const auto& interval = samples_[static_cast<unsigned>(Stage::frame_interval)];
++        if (!interval.empty()) {
++            double sum = 0.0;
++            for (const auto v : interval) sum += v;
++            std::snprintf(line, sizeof line, "profile-fps avg=%.2f (from %zu frame intervals)",
++                1e9 / (sum / interval.size()), interval.size());
++            out << line << '\n';
++        }
++        const auto& present = samples_[static_cast<unsigned>(Stage::render_present)];
++        if (!present.empty()) {
++            std::size_t blocking = 0U;
++            for (const auto v : present) if (v > 8'000'000U) ++blocking;
++            std::snprintf(line, sizeof line,
++                "profile-present-blocking frames_over_8ms=%zu/%zu (vsync=%d)",
++                blocking, present.size(), vsync ? 1 : 0);
++            out << line << '\n';
++        }
++        report_cpu(out, wall_end);
++        const auto* pc_path = std::getenv("STARFOX_TRACE_PC_FILE");
++        PcSampler::get().stop_and_dump(pc_path ? pc_path : "/tmp/starfox-pc.txt");
++    }
++
++private:
++    struct ThreadTicks { std::string name; std::uint64_t ticks{}; };
++
++    static std::map<int, ThreadTicks> read_threads() {
++        std::map<int, ThreadTicks> result;
++#if defined(__linux__)
++        if (auto* dir = opendir("/proc/self/task")) {
++            while (auto* entry = readdir(dir)) {
++                const int tid = std::atoi(entry->d_name);
++                if (tid <= 0) continue;
++                std::ifstream stat{std::string{"/proc/self/task/"} + entry->d_name + "/stat"};
++                std::string content;
++                std::getline(stat, content);
++                const auto open = content.find('(');
++                const auto close = content.rfind(')');
++                if (open == std::string::npos || close == std::string::npos) continue;
++                std::istringstream rest{content.substr(close + 2U)};
++                std::string field;
++                std::uint64_t utime = 0U, stime = 0U;
++                for (int i = 3; i <= 15 && (rest >> field); ++i) {
++                    if (i == 14) utime = std::stoull(field);
++                    if (i == 15) stime = std::stoull(field);
++                }
++                result[tid] = {content.substr(open + 1U, close - open - 1U), utime + stime};
++            }
++            closedir(dir);
++        }
++#endif
++        return result;
++    }
++    struct CoreTicks { std::uint64_t busy{}, total{}; };
++    static std::vector<CoreTicks> read_cores() {
++        std::vector<CoreTicks> cores;
++        std::ifstream stat{"/proc/stat"};
++        std::string line;
++        while (std::getline(stat, line)) {
++            if (line.rfind("cpu", 0) != 0 || line.size() < 4 || line[3] == ' ') continue;
++            std::istringstream fields{line};
++            std::string label;
++            fields >> label;
++            std::uint64_t v[8] = {};
++            for (auto& value : v) fields >> value;
++            const auto idle = v[3] + v[4];
++            std::uint64_t total = 0U;
++            for (auto value : v) total += value;
++            cores.push_back({total - idle, total});
++        }
++        return cores;
++    }
++    static long read_frequency_khz(unsigned cpu) {
++        std::ifstream file{"/sys/devices/system/cpu/cpu" + std::to_string(cpu)
++            + "/cpufreq/scaling_cur_freq"};
++        long khz = 0;
++        file >> khz;
++        return khz;
++    }
++    void start_capture() {
++        wall_start_ = Clock::now();
++        if (std::getenv("STARFOX_TRACE_PC") != nullptr) PcSampler::get().start();
++        threads_start_ = read_threads();
++        cores_start_ = read_cores();
++#if defined(__linux__)
++        main_tid_ = static_cast<int>(getpid());
++#endif
++    }
++    void sample_frequency() {
++        const auto khz = read_frequency_khz(0);
++        if (khz > 0) frequency_khz_.push_back(khz);
++    }
++    void report_cpu(std::ostream& out, Clock::time_point wall_end) {
++        const double wall = std::chrono::duration<double>(wall_end - wall_start_).count();
++#if defined(__linux__)
++        const double hz = static_cast<double>(sysconf(_SC_CLK_TCK));
++        const auto threads_end = read_threads();
++        for (const auto& [tid, now] : threads_end) {
++            const auto before = threads_start_.find(tid);
++            const auto base = before == threads_start_.end() ? 0U : before->second.ticks;
++            const double pct = 100.0 * static_cast<double>(now.ticks - base) / hz / wall;
++            if (pct < 1.0) continue;
++            std::snprintf(reinterpret_cast<char*>(scratch_), sizeof scratch_,
++                "profile-thread tid=%d %s name=%s cpu=%.0f%%", tid,
++                tid == main_tid_ ? "role=game" : "role=other", now.name.c_str(), pct);
++            out << reinterpret_cast<char*>(scratch_) << '\n';
++        }
++        const auto cores_end = read_cores();
++        out << "profile-cores";
++        for (std::size_t i = 0; i < cores_end.size() && i < cores_start_.size(); ++i) {
++            const auto busy = cores_end[i].busy - cores_start_[i].busy;
++            const auto total = cores_end[i].total - cores_start_[i].total;
++            out << " cpu" << i << '=' << (total ? 100U * busy / total : 0U) << '%';
++        }
++        out << '\n';
++#endif
++        if (!frequency_khz_.empty()) {
++            auto sorted = frequency_khz_;
++            std::sort(sorted.begin(), sorted.end());
++            out << "profile-cpu0-mhz min=" << sorted.front() / 1000 << " median="
++                << sorted[sorted.size() / 2U] / 1000 << " max=" << sorted.back() / 1000 << '\n';
++        }
++    }
++
++    bool enabled_{};
++    bool active_{};
++    bool series_{};
++    std::uint64_t series_work_{}, series_world_{}, series_bg_{}, series_present_{}, series_max_{};
++    std::uint64_t warmup_{};
++    std::uint64_t frames_{};
++    std::array<std::uint64_t, static_cast<unsigned>(Stage::count)> current_{};
++    std::array<bool, static_cast<unsigned>(Stage::count)> current_seen_{};
++    std::array<std::vector<std::uint32_t>, static_cast<unsigned>(Stage::count)> samples_;
++    Clock::time_point wall_start_{};
++    std::map<int, ThreadTicks> threads_start_;
++    std::vector<CoreTicks> cores_start_;
++    std::vector<long> frequency_khz_;
++    int main_tid_{};
++    unsigned char scratch_[192]{};
++};
++
++class ScopedStage {
++public:
++    explicit ScopedStage(Stage stage) noexcept
++        : stage_(stage), begin_(FrameProfile::Clock::now()) {}
++    ~ScopedStage() {
++        FrameProfile::get().add(stage_, begin_, FrameProfile::Clock::now());
++    }
++    ScopedStage(const ScopedStage&) = delete;
++    ScopedStage& operator=(const ScopedStage&) = delete;
++private:
++    Stage stage_;
++    FrameProfile::Clock::time_point begin_;
++};
++
++} // namespace starfox::app
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index affb39d..b28c99f 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@ -36,6 +36,7 @@
+ #include "starfox/render/model_motion_history.hpp"
+ #include "starfox/render/scaled_text_renderer.hpp"
+ #include "starfox/render/software_renderer.hpp"
++#include "starfox/app/frame_profile.hpp"
+ #include "renderer_window.hpp"
+ #include "dlss_host.hpp"
+ #include "starfox/render/terrain_profile.hpp"
+@@ -1898,8 +1899,11 @@ public:
+         gpu_frame_pending_=false;
+         ensure_dimensions(
+             framebuffer.stored_width(), framebuffer.stored_height());
+-        starfox::render::expand_rgba(
+-            framebuffer, rgba_, palette, presentation_workers_);
++        {
++            const starfox::app::ScopedStage profile_expand{starfox::app::Stage::expand};
++            starfox::render::expand_rgba(
++                framebuffer, rgba_, palette, presentation_workers_);
++        }
+         // Reconstruct the cartridge-authored 2D art before any screen-space
+         // effect reads the frame, so anti-aliasing and the surface passes see
+         // resolved edges rather than the nearest-neighbour blocks the render
+@@ -3528,10 +3532,13 @@ private:
+         const auto base = smooth_layer_ready_
+             ? std::span<const std::uint8_t>{smooth_base_rgba_}
+             : bloom_layer_ready_ ? std::span<const std::uint8_t>{bloom_base_rgba_} : rgba;
++        const auto profile_upload_begin = std::chrono::steady_clock::now();
+         if (!gpu_uploaded && !SDL_UpdateTexture(texture_, nullptr, base.data(),
+                 static_cast<int>(width * 4U))) {
+             throw std::runtime_error{std::string{"SDL_UpdateTexture: "} + SDL_GetError()};
+         }
++        starfox::app::FrameProfile::get().add(starfox::app::Stage::update_texture,
++            profile_upload_begin, std::chrono::steady_clock::now());
+         if (smooth_layer_ready_) {
+             ensure_1440p_model_textures(width, height);
+             if (!gpu_uploaded && !SDL_UpdateTexture(smooth_model_texture_, nullptr,
+@@ -3555,10 +3562,13 @@ private:
+                     + SDL_GetError()};
+             }
+         }
++        const auto profile_render_begin = std::chrono::steady_clock::now();
+         SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+         SDL_RenderClear(renderer_);
+         SDL_RenderTexture(renderer_, smooth_layer_ready_
+             ? smooth_target_texture_ : texture_, nullptr, nullptr);
++        starfox::app::FrameProfile::get().add(starfox::app::Stage::render_texture,
++            profile_render_begin, std::chrono::steady_clock::now());
+         if (bloom_layer_ready_) {
+             ensure_bloom_texture(width,height);
+             if (!gpu_uploaded && !SDL_UpdateTexture(bloom_texture_, nullptr, bloom_glow_rgba_.data(),
+@@ -3602,7 +3612,10 @@ private:
+                 }
+             }
+         }
++        const auto profile_swap_begin = std::chrono::steady_clock::now();
+         last_present_succeeded_=SDL_RenderPresent(renderer_);
++        starfox::app::FrameProfile::get().add(starfox::app::Stage::render_present,
++            profile_swap_begin, std::chrono::steady_clock::now());
+     }
+     void ensure_dimensions(std::uint32_t width, std::uint32_t height) {
+         if (width == texture_width_ && height == texture_height_) return;
+@@ -3669,6 +3682,9 @@ private:
+     starfox::render::RowWorkers presentation_workers_;
+     std::vector<std::uint32_t> overlay_argb_;
+     bool vsync_{};
++public:
++    [[nodiscard]] bool vsync_enabled() const noexcept { return vsync_; }
++private:
+     starfox::simulation::RendererMode renderer_mode_{
+         starfox::simulation::RendererMode::gpu};
+     bool smooth_layer_ready_{};
+@@ -5685,6 +5701,7 @@ int main(int argc, char** argv) {
+         std::uint64_t profile_world_ns{};
+         std::uint64_t profile_composite_ns{};
+         std::uint64_t profile_present_ns{};
++        std::chrono::steady_clock::time_point profile_previous_loop_start{};
+         const auto test_frames_text = std::getenv("STARFOX_TEST_FRAMES");
+         const auto test_frames = test_frames_text == nullptr
+             ? std::uint64_t{0}
+@@ -5697,6 +5714,9 @@ int main(int argc, char** argv) {
+         std::uint64_t profile_measured_frames{};
+         std::vector<std::uint64_t> profile_render_samples;
+         if (profile_distribution) profile_render_samples.reserve(test_frames);
++        starfox::app::FrameProfile::get().configure(
++            test_frames != 0U && std::getenv("STARFOX_TRACE_PROFILE") != nullptr,
++            profile_warmup, test_frames);
+         const auto capture_path_text = std::getenv("STARFOX_CAPTURE_PATH");
+         const auto capture_path = capture_path_text == nullptr
+             ? std::filesystem::path{} : std::filesystem::path{capture_path_text};
+@@ -6461,9 +6481,21 @@ int main(int argc, char** argv) {
+             window.set_relative_mouse_mode(
+                 ex_mouse_capture || mouse_camera.active);
+ 
++            auto& frame_profile = starfox::app::FrameProfile::get();
++            frame_profile.begin_frame(presented_frames);
+             if (!test_unpaced && !advance_frozen_frame) {
++                const auto profile_pacer_begin = std::chrono::steady_clock::now();
+                 pacer.wait_for_next_frame(game.presentation_fps());
++                frame_profile.add(starfox::app::Stage::pacer_wait,
++                    profile_pacer_begin, std::chrono::steady_clock::now());
++            }
++            const auto profile_loop_start = std::chrono::steady_clock::now();
++            if (frame_profile.active() && profile_previous_loop_start.time_since_epoch().count() != 0) {
++                frame_profile.record(starfox::app::Stage::frame_interval,
++                    static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
++                        profile_loop_start - profile_previous_loop_start).count()));
+             }
++            profile_previous_loop_start = profile_loop_start;
+             const auto* keyboard_state = SDL_GetKeyboardState(nullptr);
+             const auto menu_peek = starfox::app::peek_setup_menu(
+                 game.in_setup_menu(),
+@@ -6750,7 +6782,15 @@ int main(int argc, char** argv) {
+                     const auto scripted_bombs_before=trace_scripted_input
+                         ?scripted_bomb_count():0;
+                     const bool runtime_options_were_open=game.runtime_options_open();
++                    const auto profile_tick_begin = std::chrono::steady_clock::now();
++                    starfox::app::mark_phase(1);
+                     const auto tick_result = game.tick(controls);
++                    starfox::app::mark_phase(0);
++                    {
++                        const auto profile_tick_end = std::chrono::steady_clock::now();
++                        frame_profile.add(starfox::app::Stage::logic, profile_tick_begin, profile_tick_end);
++                        frame_profile.add(starfox::app::Stage::tick_only, profile_tick_begin, profile_tick_end);
++                    }
+                     if(runtime_options_were_open && !game.runtime_options_open()) {
+                         audio.set_paused(false);input.reset();
+                     }
+@@ -6864,11 +6904,16 @@ int main(int argc, char** argv) {
+                             == starfox::simulation::Experience::original);
+                 }
+                 if (!game.runtime_options_open() && ++audio_video_phases >= 3U) {
++                    const auto profile_audio_begin = std::chrono::steady_clock::now();
++                    starfox::app::mark_phase(2);
+                     game.synchronize_apu_output_ports(
+                         audio.queue_logic_tick(
+                             pending_audio_writes, pending_msu_writes,
+                             speed_multiplier,
+                             !advance_frozen_frame));
++                    starfox::app::mark_phase(0);
++                    frame_profile.add(starfox::app::Stage::audio,
++                        profile_audio_begin, std::chrono::steady_clock::now());
+                     pending_audio_writes.clear();
+                     pending_msu_writes.clear();
+                     audio_video_phases = 0U;
+@@ -6876,6 +6921,7 @@ int main(int argc, char** argv) {
+             }
+             if (restart_runtime) break;
+             const auto profile_frame_start = std::chrono::steady_clock::now();
++            starfox::app::mark_phase(3);
+             const auto display_width = display_width_for(game.display_mode());
+             auto active_hud_layout = hud_layouts[
+                 hud_profile_index(game.display_mode(), game.experience())];
+@@ -7627,6 +7673,7 @@ int main(int argc, char** argv) {
+             }
+             const auto profile_background_done =
+                 std::chrono::steady_clock::now();
++            starfox::app::mark_phase(4);
+             // This pass contains scenery only. Mark its cartridge pixels
+             // before compositing models, dialogue and HUD; cached backgrounds
+             // take this path too. Keep front-end/native menu artwork protected.
+@@ -8671,6 +8718,7 @@ int main(int argc, char** argv) {
+             // viewer/Continue ship. Never consume the preceding frame's buffers.
+             render_model_shadows();
+             const auto profile_world_done = std::chrono::steady_clock::now();
++            starfox::app::mark_phase(5);
+             // Colour zero is transparent in every host Super FX layer.
+             const auto composite_superfx = [&framebuffer, viewport_origin, boss_roll,
+                                                 &ppu,&resident_raster,&resident_layer,&superfx_frame,
+@@ -9619,6 +9667,8 @@ int main(int argc, char** argv) {
+                 presentation_effects.temporal_ground=starfox::render::TemporalGroundPlane{
+                     {float(normal.x),float(normal.y),float(normal.z),float(-(point.x*normal.x+point.y*normal.y+point.z*normal.z))},shadow_height};
+             }
++            const auto profile_present_begin = std::chrono::steady_clock::now();
++            starfox::app::mark_phase(6);
+             const bool stereo_presented=resident_raster && record_models && game.stereo_output()!=0U
+                 && window.present_stereo(recorded_scene,framebuffer,palette,circle,presentation_effects,
+                     raster_commands,superfx_frame.draw_scale(),resident_layer,game.stereo_output());
+@@ -9643,6 +9693,9 @@ int main(int argc, char** argv) {
+                 presentation_effects.background=nullptr;presentation_effects.background_cpu_coverage={};
+                 window.present(framebuffer, palette, circle, presentation_effects);
+             }
++            starfox::app::mark_phase(0);
++            frame_profile.add(starfox::app::Stage::present_total,
++                profile_present_begin, std::chrono::steady_clock::now());
+             window.finish_temporal_frame(temporal_presented);
+             framebuffer.end_write_coverage();
+             if (test_frames != 0 && presented_frames + 1U == test_frames) {
+@@ -9712,6 +9765,11 @@ int main(int argc, char** argv) {
+             }
+ #endif
+             const auto profile_present_done = std::chrono::steady_clock::now();
++            frame_profile.add(starfox::app::Stage::background, profile_frame_start, profile_background_done);
++            frame_profile.add(starfox::app::Stage::world, profile_background_done, profile_world_done);
++            frame_profile.add(starfox::app::Stage::composite, profile_world_done, profile_composite_done);
++            frame_profile.add(starfox::app::Stage::frame_work, profile_loop_start, profile_present_done);
++            frame_profile.end_frame();
+             if (presented_frames>=profile_warmup) {
+             ++profile_measured_frames;
+             if (profile_distribution) {
+@@ -9854,6 +9912,7 @@ int main(int argc, char** argv) {
+                               << " measured=" << live_fps.fps()
+                               << " frames=" << presented_frames << '\n';
+                 }
++                frame_profile.report(std::cerr, window.vsync_enabled());
+                 if (std::getenv("STARFOX_TRACE_PROFILE") != nullptr
+                     && profile_measured_frames != 0U) {
+                     const auto average_us = [profile_measured_frames](
