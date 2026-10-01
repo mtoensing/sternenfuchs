@@ -34,13 +34,9 @@ fi
 
 if [ "$CMD" = prepare ]; then
   SRC="$ROOT/.work/starfox-enhanced"
-  rm -rf "$SRC"; mkdir -p "$SRC"
-  curl -fsSL --retry 5 --retry-delay 10 \
-    "https://archive.softwareheritage.org/api/1/vault/flat/swh:1:dir:$STARFOX_SWH_DIR/raw/" \
-    | tar xz --strip-components=1 -C "$SRC"
-  git -C "$SRC" init -q
-  git -C "$SRC" add -A >/dev/null 2>&1
-  git -C "$SRC" -c user.name=base -c user.email=base@local commit -qm "upstream $STARFOX_COMMIT"
+  rm -rf "$SRC"
+  GIT_LFS_SKIP_SMUDGE=1 git clone -q "$STARFOX_REPO" "$SRC"
+  git -C "$SRC" checkout -q "$STARFOX_COMMIT"
   git -C "$SRC" tag -f upstream >/dev/null
   for p in "$ROOT"/patches/*.patch; do
     git -C "$SRC" apply "$p"
