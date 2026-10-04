@@ -38,8 +38,8 @@ same change is merged there.
   `gh pr create --repo PortsMaster-MV/PortMaster-MV-New --head mtoensing:<branch>`.
   Earlier PRs (#154-#157, #160) are good examples: short description, list of
   what changed, what was tested.
-- Do not overwrite MV-only differences when copying (for example
-  `"availability"` in `port.json` and the binaries). Diff before copying.
+- `"availability"` in `port.json` is `"paid"` (the player needs to own a ROM)
+  in both repos. Diff before copying so nothing MV-only gets overwritten.
 - Binary releases are built with `scripts/build-arm64.sh`, which also produces
   `dist/sternenfuchs-pr.zip` (the submission layout).
 - Author and attribution rules above apply to the MV PRs as well.
