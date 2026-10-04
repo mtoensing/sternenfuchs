@@ -7,8 +7,9 @@ builds on. Thanks to bmdhacks for the SDL3-to-SDL2 backend shim.
 
 No Nintendo ROM or ROM-derived data is included. Copy your own legally
 obtained Star Fox/Starwing `.sfc` or `.smc` ROM (USA, Japan or Europe retail
-revision) into `ports/sternenfuchs/`. On first launch the game builds
-`Starfox-Assets.BIN` from it.
+revision) into the `ports/sternenfuchs/` folder, where the `your rom here.txt`
+file marks the spot (e.g. `/roms/ports/sternenfuchs/` on KNULLI). On first
+launch the game builds `Starfox-Assets.BIN` from it.
 
 Supported unmodified retail dumps (No-Intro names; a 512-byte copier header
 is fine). The launcher and game check the CRC32:
