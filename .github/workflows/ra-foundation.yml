@@ -1,0 +1,34 @@
+name: ra-foundation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ra/**"
+      - "tests/ra_*"
+      - "scripts/build-rcheevos-arm64.sh"
+      - "scripts/versions.sh"
+      - ".github/workflows/ra-foundation.yml"
+
+jobs:
+  arm64-foundation:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:22.04
+
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y             ca-certificates git build-essential file
+
+      - uses: actions/checkout@v4
+
+      - name: Build pinned rcheevos
+        run: bash scripts/build-rcheevos-arm64.sh
+
+      - name: Test read-only SNES WRAM adapter
+        run: |
+          c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I.             tests/ra_memory_adapter_test.cpp             -o /tmp/ra_memory_adapter_test
+          /tmp/ra_memory_adapter_test
