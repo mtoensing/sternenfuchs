@@ -21,7 +21,7 @@ Confirmed so far:
 - **All 27 addresses are inside standard SNES 128 KiB WRAM.**
 - No achievement in the analyzed snapshot currently requires an additional save-RAM, VRAM, CGRAM or hardware-register region.
 - Real ROM identification and real-gameplay trigger validation still require access to a user-owned Star Fox ROM.
-- No server-side unlock submission is enabled.
+- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- No server-side unlock submission is enabled.
 
 ## Architecture
 
@@ -283,7 +283,7 @@ The project must not attempt to bypass RetroAchievements' client approval or gam
 - #14 — expose RA logical WRAM through MapVm — **completed**
 - #15 — inventory current Star Fox achievement addresses — **completed**
 - #16 — verify one real achievement condition against live gameplay
-- #17 — determine correct evaluation cadence\n- #18 — parse real Star Fox definitions against synthetic WRAM — **implemented; awaiting CI result**\n- #19 — audit Hardcore-incompatible runtime features — **completed**
+- #17 — determine correct evaluation cadence\n- #18 — parse real Star Fox definitions against synthetic WRAM — **completed; ARM64 CI PASS**\n- #19 — audit Hardcore-incompatible runtime features — **completed**
 
 ### Larger phases
 
