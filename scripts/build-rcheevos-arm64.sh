@@ -25,7 +25,7 @@ if [ "${#SOURCES[@]}" -eq 0 ]; then
 fi
 
 CFLAGS=(
-  -std=c99
+  -std=gnu99
   -O2
   -march=armv8-a
   -DRC_DISABLE_LUA
@@ -55,11 +55,13 @@ int main(void) {
 }
 EOF
 
-cc -std=c99 -O2 -march=armv8-a   -I"$SRC/include"   "$WORK/smoke.c" "$OUT" -lm -o "$WORK/rcheevos-smoke"
+cc -std=gnu99 -O2 -march=armv8-a \
+  -I"$SRC/include" -I"$SRC/src" \
+  "$WORK/smoke.c" "$OUT" -lm -o "$WORK/rcheevos-smoke"
 
 "$WORK/rcheevos-smoke"
 
-cc -std=c99 -O2 -march=armv8-a \
+cc -std=gnu99 -O2 -march=armv8-a \
   -I"$SRC/include" -I"$SRC/src" \
   "$ROOT/tests/ra_starfox_runtime_test.c" "$OUT" -lm \
   -o "$WORK/ra-starfox-runtime-test"
