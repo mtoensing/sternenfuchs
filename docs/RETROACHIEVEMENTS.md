@@ -258,7 +258,7 @@ enum class AchievementMode {
 
 All prohibited runtime actions should consult that policy.
 
-Detailed implementation belongs to Phase 3 of the project plan.
+Detailed source-level audit: [ra/hardcore-audit.md](ra/hardcore-audit.md)\n\nDetailed implementation belongs to Phase 3 of the project plan.
 
 ## Official Hardcore approval is a separate gate
 
@@ -283,7 +283,7 @@ The project must not attempt to bypass RetroAchievements' client approval or gam
 - #14 — expose RA logical WRAM through MapVm — **completed**
 - #15 — inventory current Star Fox achievement addresses — **completed**
 - #16 — verify one real achievement condition against live gameplay
-- #17 — determine correct evaluation cadence
+- #17 — determine correct evaluation cadence\n- #18 — parse real Star Fox definitions against synthetic WRAM — **implemented; awaiting CI result**\n- #19 — audit Hardcore-incompatible runtime features — **completed**
 
 ### Larger phases
 
