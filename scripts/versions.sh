@@ -11,3 +11,7 @@ SDL_SHIM_REPO="https://github.com/bmdhacks/SDL.git"
 SDL_SHIM_COMMIT="6057d79baf8321bf190479a699655f06cc2a962f"
 
 SPIRV_CROSS_REPO="https://github.com/KhronosGroup/SPIRV-Cross.git"
+
+# RetroAchievements client/runtime library. Pin master (official release line), not develop.
+RCHEEVOS_REPO="https://github.com/RetroAchievements/rcheevos.git"
+RCHEEVOS_COMMIT="1433173220a7eaede6a9ed7a18e94117be1821e0" # v12.5.0
