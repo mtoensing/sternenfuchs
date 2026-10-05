@@ -49,7 +49,7 @@ cat > "$WORK/smoke.c" <<'EOF'
 
 int main(void) {
   printf("rcheevos=%s console=%s\n",
-      RCHEEVOS_VERSION_STRING,
+      rc_version_string(),
       rc_console_name(RC_CONSOLE_SUPER_NINTENDO));
   return 0;
 }
