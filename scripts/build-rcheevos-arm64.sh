@@ -58,7 +58,15 @@ EOF
 cc -std=c99 -O2 -march=armv8-a   -I"$SRC/include"   "$WORK/smoke.c" "$OUT" -lm -o "$WORK/rcheevos-smoke"
 
 "$WORK/rcheevos-smoke"
-file "$OUT" "$WORK/rcheevos-smoke"
+
+cc -std=c99 -O2 -march=armv8-a \
+  -I"$SRC/include" -I"$SRC/src" \
+  "$ROOT/tests/ra_starfox_runtime_test.c" "$OUT" -lm \
+  -o "$WORK/ra-starfox-runtime-test"
+
+"$WORK/ra-starfox-runtime-test"
+
+file "$OUT" "$WORK/rcheevos-smoke" "$WORK/ra-starfox-runtime-test"
 
 echo "Built: $OUT"
 echo "Pinned rcheevos: $RCHEEVOS_COMMIT"
