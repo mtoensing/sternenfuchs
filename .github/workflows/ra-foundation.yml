@@ -43,3 +43,29 @@ jobs:
         run: |
           c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -I.             tests/ra_memory_adapter_test.cpp             -o /tmp/ra_memory_adapter_test
           /tmp/ra_memory_adapter_test
+
+
+  arm64-menu-build:
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ubuntu:22.04
+
+    steps:
+      - name: Install full build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ca-certificates git curl cmake ninja-build build-essential python3 \
+            zip file binutils pkg-config
+
+      - uses: actions/checkout@v4
+
+      - name: Build transformed Sternenfuchs runtime
+        env:
+          STARFOX_PGO_PHASE: none
+        run: ./scripts/build-arm64.sh
+
+      - name: Verify ARM64 runtime artifact
+        run: |
+          test -x dist/sternenfuchs/starfox.aarch64
+          file dist/sternenfuchs/starfox.aarch64
