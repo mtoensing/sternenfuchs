@@ -88,6 +88,7 @@ cmake --install "$SDL/build"
 for patch in "$ROOT"/patches/*.patch; do
   git -C "$SRC" apply "$patch"
 done
+python3 "$ROOT/scripts/apply-ra-menu.py" "$SRC"
 
 # The RG40XX H (H700) is a quad-core Cortex-A53 @ 1.5GHz; real-device
 # testing showed the game pegging a single core at 100% while the other
