@@ -1,0 +1,140 @@
+diff --git a/include/starfox/simulation/game_simulation.hpp b/include/starfox/simulation/game_simulation.hpp
+index 0000000..0000000 100644
+--- a/include/starfox/simulation/game_simulation.hpp
++++ b/include/starfox/simulation/game_simulation.hpp
+@@
+ enum class PregamePage {
+     main,
+     options,
+     two_d,
+     three_d,
+     cheats,
++    retroachievements,
+ };
+@@
+-inline constexpr std::array<std::uint8_t, 12> options_menu_order{9,0,1,2,3,4,5,6,7,8,12,11};
++inline constexpr std::array<std::uint8_t, 13> options_menu_order{9,0,1,2,3,4,5,6,7,8,12,30,11};
+ inline constexpr std::array<std::uint8_t, 7> cheats_menu_order{0,1,2,3,4,5,6};
++inline constexpr std::array<std::uint8_t, 4> retroachievements_menu_order{0,1,2,3};
+ inline std::span<const std::uint8_t> pregame_menu_order(PregamePage page) {
+     switch (page) {
+     case PregamePage::two_d: return two_d_menu_order;
+     case PregamePage::three_d: return three_d_menu_order;
+     case PregamePage::options: return options_menu_order;
+     case PregamePage::cheats: return cheats_menu_order;
++    case PregamePage::retroachievements: return retroachievements_menu_order;
+     default: return main_menu_order;
+     }
+ }
+@@
+     [[nodiscard]] PregamePage pregame_page() const noexcept {
+         return pregame_page_;
+     }
++    [[nodiscard]] bool ra_hardcore_requested() const noexcept {
++        return ra_hardcore_requested_;
++    }
++    [[nodiscard]] std::uint8_t consume_ra_menu_action() noexcept {
++        const auto action = ra_menu_action_;
++        ra_menu_action_ = 0U;
++        return action;
++    }
+@@
+     std::uint8_t pregame_selection_{};
+     PregamePage pregame_page_{PregamePage::main};
++    bool ra_hardcore_requested_{};
++    std::uint8_t ra_menu_action_{};
+     bool runtime_options_open_{};
+diff --git a/src/simulation/game_simulation.cpp b/src/simulation/game_simulation.cpp
+index 0000000..0000000 100644
+--- a/src/simulation/game_simulation.cpp
++++ b/src/simulation/game_simulation.cpp
+@@
+-    if (pregame_page_ == PregamePage::cheats) {
++    if (pregame_page_ == PregamePage::retroachievements) {
++        const auto activate = (menu_input.pressed & (starfox::input::a
++            | starfox::input::select | starfox::input::left
++            | starfox::input::right)) != 0U;
++        if ((menu_input.pressed & starfox::input::b) != 0U
++            || (pregame_selection_ == 3U && activate)) {
++            pregame_page_ = PregamePage::options;
++            pregame_selection_ = 30U;
++            queue_sound_effect(0x11U);
++        } else if (activate) {
++            if (pregame_selection_ == 0U) {
++                ra_menu_action_ = 1U; // username edit request, handled by host
++            } else if (pregame_selection_ == 1U) {
++                ra_menu_action_ = 2U; // password edit request, handled by host
++            } else if (pregame_selection_ == 2U) {
++                ra_hardcore_requested_ = !ra_hardcore_requested_;
++            }
++            queue_sound_effect(0x11U);
++        }
++        result.audio_port_writes = map_.take_apu_port_writes();
++        return result;
++    }
++
++    if (pregame_page_ == PregamePage::cheats) {
+@@
+         if (go_back) {
+             pregame_page_ = PregamePage::main;
+             pregame_selection_ = 14U;
+             queue_sound_effect(0x11U);
++        } else if (pregame_selection_ == 30U
++                   && (menu_input.pressed & (starfox::input::left
++                       | starfox::input::right | starfox::input::select
++                       | starfox::input::a)) != 0U) {
++            pregame_page_ = PregamePage::retroachievements;
++            pregame_selection_ = 0U;
++            queue_sound_effect(0x11U);
+         } else if (pregame_selection_ == 0U
+diff --git a/src/simulation/game_state.cpp b/src/simulation/game_state.cpp
+index 0000000..0000000 100644
+--- a/src/simulation/game_state.cpp
++++ b/src/simulation/game_state.cpp
+@@
+-        || !valid_enum(result->pregame_page_, PregamePage::cheats)
++        || !valid_enum(result->pregame_page_, PregamePage::retroachievements)
+diff --git a/src/app/starfox_pc.cpp b/src/app/starfox_pc.cpp
+index 0000000..0000000 100644
+--- a/src/app/starfox_pc.cpp
++++ b/src/app/starfox_pc.cpp
+@@
+-                    if (game.pregame_page() == starfox::simulation::PregamePage::cheats) {
++                    if (game.pregame_page()
++                        == starfox::simulation::PregamePage::retroachievements) {
++                        draw_centred("RETROACHIEVEMENTS", 27, 10U);
++                        draw_row("USERNAME", "A  EDIT", 60,
++                            game.pregame_selection() == 0U);
++                        draw_row("PASSWORD", "A  EDIT", 100,
++                            game.pregame_selection() == 1U);
++                        draw_row("HARDCORE",
++                            game.ra_hardcore_requested()
++                                ? std::string_view{"ON"}
++                                : std::string_view{"OFF"},
++                            140, game.pregame_selection() == 2U);
++                        draw_row("BACK", "", 180,
++                            game.pregame_selection() == 3U);
++                        constexpr std::array<std::int32_t, 4> ra_cursor_y{
++                            63, 103, 143, 183};
++                        draw_cursor(ra_cursor_y[game.pregame_selection()]);
++                    } else if (game.pregame_page() == starfox::simulation::PregamePage::cheats) {
+@@
+                         draw_row("LANGUAGE", language_names[game.language()], 185,
+                             game.pregame_selection() == 12U);
+-                        draw_row("BACK", "", 200,
++                        draw_row("RETROACHIEVEMENTS", "A  OPEN", 200,
++                            game.pregame_selection() == 30U);
++                        draw_row("BACK", "", 215,
+                             game.pregame_selection() == 11U);
+@@
+-                        constexpr std::array<std::int32_t, 13> cursor_y{
+-                            43, 58, 73, 88, 103, 118, 133, 157, 173, 28, 197, 203, 188};
+-                        draw_cursor(cursor_y[game.pregame_selection()]);
++                        std::array<std::int32_t, 31> cursor_y{};
++                        cursor_y.fill(0);
++                        cursor_y[0]=43; cursor_y[1]=58; cursor_y[2]=73;
++                        cursor_y[3]=88; cursor_y[4]=103; cursor_y[5]=118;
++                        cursor_y[6]=133; cursor_y[7]=157; cursor_y[8]=173;
++                        cursor_y[9]=28; cursor_y[11]=218; cursor_y[12]=188;
++                        cursor_y[30]=203;
++                        draw_cursor(cursor_y[game.pregame_selection()]);
