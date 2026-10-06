@@ -331,7 +331,6 @@ replace_once(
 replace_once(
     "src/app/starfox_pc.cpp",
     """                    const auto tick_result = game.tick(controls);
-                    if(runtime_options_were_open && !game.runtime_options_open()) {
 """,
     """                    const auto tick_result = game.tick(controls);
 #if defined(STERNENFUCHS_RA_ENABLED)
@@ -354,7 +353,6 @@ replace_once(
                         std::cerr << "ra-hardcore: switched to casual\\n";
                     }
 #endif
-                    if(runtime_options_were_open && !game.runtime_options_open()) {
 """)
 
 print("Applied Sternenfuchs live RetroAchievements runtime integration")
