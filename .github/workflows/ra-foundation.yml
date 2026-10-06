@@ -8,6 +8,9 @@ on:
       - "ra/**"
       - "tests/ra_*"
       - "scripts/build-rcheevos-arm64.sh"
+      - "scripts/build-arm64.sh"
+      - "scripts/apply-ra-menu.py"
+      - "scripts/apply-ra-runtime.py"
       - "scripts/versions.sh"
       - ".github/workflows/ra-foundation.yml"
 
