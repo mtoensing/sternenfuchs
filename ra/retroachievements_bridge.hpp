@@ -13,10 +13,25 @@ namespace sternenfuchs::ra {
 
 class RetroAchievementsBridge {
 public:
+    struct Event {
+        std::uint32_t id{};
+        std::int32_t value{};
+        std::uint8_t type{};
+    };
+
+    struct MeasuredProgress {
+        unsigned value{};
+        unsigned target{};
+    };
+
     using ByteReader = std::function<std::optional<std::uint8_t>(std::uint32_t)>;
     using TriggerHandler = std::function<void(std::uint32_t)>;
+    using EventHandler = std::function<void(const Event&)>;
 
-    RetroAchievementsBridge(ByteReader reader, TriggerHandler on_trigger = {});
+    RetroAchievementsBridge(
+        ByteReader reader,
+        TriggerHandler on_trigger = {},
+        EventHandler on_event = {});
     ~RetroAchievementsBridge();
 
     RetroAchievementsBridge(const RetroAchievementsBridge&) = delete;
@@ -28,6 +43,8 @@ public:
         std::uint32_t id, std::string_view definition);
     void deactivate_achievement(std::uint32_t id);
     void evaluate_phase();
+    [[nodiscard]] std::optional<MeasuredProgress>
+        measured_progress(std::uint32_t id) const;
     void reset();
 
 private:
