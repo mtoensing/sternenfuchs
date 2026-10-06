@@ -198,6 +198,11 @@ replace_once(
                     ++ra_local_trigger_count;
                     std::cerr << "ra-local-trigger id=" << id
                               << " total=" << ra_local_trigger_count << '\\n';
+                },
+                [](const sternenfuchs::ra::RetroAchievementsBridge::Event& event) {
+                    std::cerr << "ra-event id=" << event.id
+                              << " type=" << unsigned(event.type)
+                              << " value=" << event.value << '\\n';
                 });
             for (const auto& achievement :
                  sternenfuchs::ra::kStarFoxAchievements) {
