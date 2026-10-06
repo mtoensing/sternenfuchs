@@ -1,5 +1,6 @@
 #include "ra/game_identity.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
@@ -44,8 +45,8 @@ int main() {
     const auto sfc = dir / "synthetic.sfc";
     write_file(sfc, payload);
 
-    std::vector<std::uint8_t> headered(512U, 0x5aU);
-    headered.insert(headered.end(), payload.begin(), payload.end());
+    std::vector<std::uint8_t> headered(512U + payload.size(), 0x5aU);
+    std::copy(payload.begin(), payload.end(), headered.begin() + 512U);
     const auto smc = dir / "synthetic.smc";
     write_file(smc, headered);
 
@@ -57,7 +58,9 @@ int main() {
     assert(valid_hash(sfc_hash_2));
     assert(valid_hash(smc_hash));
     assert(*sfc_hash_1 == *sfc_hash_2);
-    assert(*sfc_hash_1 != *smc_hash);
+    // rcheevos intentionally normalizes the common 512-byte SNES copier
+    // header, so equivalent headered/unheadered media resolve to one identity.
+    assert(*sfc_hash_1 == *smc_hash);
 
     const auto missing = sternenfuchs::ra::hash_snes_file(
         dir / "missing.sfc");
