@@ -98,8 +98,7 @@ std::uint32_t RetroAchievementsBridge::peek(
 
 void RetroAchievementsBridge::handle_event(
     const rc_runtime_event_t* event) {
-    if (!event || event->type != RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED)
-        return;
+    if (!event) return;
     auto* impl = static_cast<Impl*>(g_active_impl);
     if (!impl) return;
     if (impl->on_event) {
