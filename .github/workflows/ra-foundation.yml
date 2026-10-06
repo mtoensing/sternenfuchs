@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y             ca-certificates git build-essential file
+          DEBIAN_FRONTEND=noninteractive apt-get install -y             ca-certificates git build-essential file python3
 
       - uses: actions/checkout@v4
 
@@ -34,6 +34,7 @@ jobs:
           for patch in patches/*.patch; do
             git -C /tmp/starfox-ra-patch-check apply "$GITHUB_WORKSPACE/$patch"
           done
+          python3 scripts/apply-ra-menu.py /tmp/starfox-ra-patch-check
 
       - name: Build pinned rcheevos
         run: bash scripts/build-rcheevos-arm64.sh
