@@ -7,6 +7,7 @@
 #include <string_view>
 
 struct rc_runtime_t;
+struct rc_runtime_event_t;
 
 namespace sternenfuchs::ra {
 
