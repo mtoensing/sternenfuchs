@@ -27,7 +27,7 @@ jobs:
 
       - name: Verify Sternenfuchs patches against pinned upstream
         run: |
-          source scripts/versions.sh
+          . scripts/versions.sh
           rm -rf /tmp/starfox-ra-patch-check
           GIT_LFS_SKIP_SMUDGE=1 git clone "$STARFOX_REPO" /tmp/starfox-ra-patch-check
           git -C /tmp/starfox-ra-patch-check checkout "$STARFOX_COMMIT"
