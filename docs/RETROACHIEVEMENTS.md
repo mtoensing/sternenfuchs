@@ -21,7 +21,7 @@ Confirmed so far:
 - **All 27 addresses are inside standard SNES 128 KiB WRAM.**
 - No achievement in the analyzed snapshot currently requires an additional save-RAM, VRAM, CGRAM or hardware-register region.
 - Real ROM identification and real-gameplay trigger validation still require access to a user-owned Star Fox ROM.
-- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- An isolated `RetroAchievementsBridge` now wraps rcheevos runtime activation, phase evaluation, bounded byte reads and local trigger callbacks.\n- A centralized `HardcorePolicy` state model now covers disabled/casual/hardcore modes, clean-entry requirements, save/load gating, cheat gating, scripted-input gating and playback restrictions.\n- Both isolated components are verified by ARM64 CI.\n- No server-side unlock submission is enabled.
+- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- `RetroAchievementsBridge` is now linked into the actual ARM64 `starfox_pc` runtime. It wraps rcheevos runtime activation, phase evaluation, bounded byte reads, generic runtime events, measured progress and local trigger callbacks.\n- A centralized `HardcorePolicy` state model now covers disabled/casual/hardcore modes, clean-entry requirements, save/load gating, cheat gating, scripted-input gating and playback restrictions.\n- Both isolated components are verified by ARM64 CI.\n- No server-side unlock submission is enabled.
 
 ## Architecture
 
@@ -209,7 +209,7 @@ Do **not** attach achievement evaluation to arbitrary display/render FPS.
 
 The final decision must be based on whether any real Star Fox achievement depends on transient memory values that could exist between 20 Hz logic ticks.
 
-Detailed analysis: [ra/cadence-analysis.md](ra/cadence-analysis.md)
+Detailed analysis: [ra/cadence-analysis.md](ra/cadence-analysis.md)\n\nLive offline runtime integration: [ra/runtime-integration.md](ra/runtime-integration.md)
 
 Tracking issue:
 
@@ -454,3 +454,23 @@ This proves the policy and RA-runtime abstraction can be built and exercised ind
 - no login/network transport;
 - no public unlock submission;
 - no claim of official Hardcore support.
+
+
+## Live ARM64 runtime milestone
+
+Successful full build:
+
+https://github.com/mtoensing/sternenfuchs/actions/runs/37506330247
+
+The real ARM64 PortMaster runtime now contains the offline RA evaluator and the connected Hardcore policy.
+
+Current runtime behavior:
+
+- activates all 39 analyzed Star Fox definitions for the Original experience;
+- evaluates them once per preserved SNES/video phase;
+- reads only through the bounded MapVm WRAM adapter;
+- logs local rcheevos events/triggers;
+- enforces the current pinned-runtime Hardcore restrictions;
+- keeps network submission disabled.
+
+See [ra/runtime-integration.md](ra/runtime-integration.md) for the exact architecture and remaining gates.
