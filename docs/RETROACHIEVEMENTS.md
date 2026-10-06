@@ -368,7 +368,7 @@ The smallest convincing proof is:
 
 ## In-game RetroAchievements account menu
 
-The Sternenfuchs ARM64 build now applies `scripts/apply-ra-menu.py` to the pinned Star Fox Enhanced source. CI verifies the transform against the exact pinned upstream revision before building.
+The Sternenfuchs ARM64 build now applies `scripts/apply-ra-menu.py` to the pinned Star Fox Enhanced source. CI verifies the transform against the exact pinned upstream revision and a full ARM64 PortMaster runtime build has completed successfully with the transformed menu code.
 
 The desktop/PortMaster setup menu gains:
 
@@ -392,7 +392,7 @@ The password is displayed only as `********` once set. Account credentials are d
 
 The HARDCORE row currently represents the user's requested mode only. Actual Hardcore activation still has to pass the centralized `HardcorePolicy`, perform the required clean reset and later be accepted by the RA client/server integration.
 
-No login request, credential transmission or public unlock occurs yet.
+No login request, credential transmission or public unlock occurs yet. Full ARM64 build proof: https://github.com/mtoensing/sternenfuchs/actions/runs/37477740762
 
 ## Official SNES game hashing
 
