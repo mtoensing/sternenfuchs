@@ -68,7 +68,24 @@ cc -std=gnu99 -O2 -march=armv8-a \
 
 "$WORK/ra-starfox-runtime-test"
 
-file "$OUT" "$WORK/rcheevos-smoke" "$WORK/ra-starfox-runtime-test"
+c++ -std=c++20 -O2 -march=armv8-a -Wall -Wextra -Wpedantic \
+  -I"$ROOT" \
+  "$ROOT/tests/ra_hardcore_policy_test.cpp" \
+  -o "$WORK/ra-hardcore-policy-test"
+
+"$WORK/ra-hardcore-policy-test"
+
+c++ -std=c++20 -O2 -march=armv8-a -Wall -Wextra -Wpedantic \
+  -I"$ROOT" -I"$SRC/include" -I"$SRC/src" \
+  "$ROOT/ra/retroachievements_bridge.cpp" \
+  "$ROOT/tests/ra_bridge_test.cpp" \
+  "$OUT" -lm \
+  -o "$WORK/ra-bridge-test"
+
+"$WORK/ra-bridge-test"
+
+file "$OUT" "$WORK/rcheevos-smoke" "$WORK/ra-starfox-runtime-test" \
+  "$WORK/ra-hardcore-policy-test" "$WORK/ra-bridge-test"
 
 echo "Built: $OUT"
 echo "Pinned rcheevos: $RCHEEVOS_COMMIT"
