@@ -84,8 +84,25 @@ c++ -std=c++20 -O2 -march=armv8-a -Wall -Wextra -Wpedantic \
 
 "$WORK/ra-bridge-test"
 
+c++ -std=c++20 -O2 -march=armv8-a -Wall -Wextra -Wpedantic \
+  -I"$ROOT" -I"$SRC/include" -I"$SRC/src" \
+  "$ROOT/ra/game_identity.cpp" \
+  "$ROOT/tests/ra_game_identity_test.cpp" \
+  "$OUT" -lm \
+  -o "$WORK/ra-game-identity-test"
+
+"$WORK/ra-game-identity-test"
+
+c++ -std=c++20 -O2 -march=armv8-a -Wall -Wextra -Wpedantic \
+  -I"$ROOT" \
+  "$ROOT/tests/ra_account_session_test.cpp" \
+  -o "$WORK/ra-account-session-test"
+
+"$WORK/ra-account-session-test"
+
 file "$OUT" "$WORK/rcheevos-smoke" "$WORK/ra-starfox-runtime-test" \
-  "$WORK/ra-hardcore-policy-test" "$WORK/ra-bridge-test"
+  "$WORK/ra-hardcore-policy-test" "$WORK/ra-bridge-test" \
+  "$WORK/ra-game-identity-test" "$WORK/ra-account-session-test"
 
 echo "Built: $OUT"
 echo "Pinned rcheevos: $RCHEEVOS_COMMIT"
