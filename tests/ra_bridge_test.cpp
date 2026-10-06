@@ -10,13 +10,15 @@ int main() {
 
     std::array<std::uint8_t, 0x20000> wram{};
     std::uint32_t triggered = 0;
+    std::uint32_t event_count = 0;
 
     RetroAchievementsBridge bridge{
         [&](std::uint32_t address) -> std::optional<std::uint8_t> {
             if (address >= wram.size()) return std::nullopt;
             return wram[address];
         },
-        [&](std::uint32_t id) { triggered = id; }};
+        [&](std::uint32_t id) { triggered = id; },
+        [&](const RetroAchievementsBridge::Event&) { ++event_count; }};
 
     assert(bridge.activate_achievement(5158U, "0xH0015af=5"));
 
@@ -27,6 +29,7 @@ int main() {
     wram[0x15af] = 5;
     bridge.evaluate_phase();
     assert(triggered == 5158U);
+    assert(event_count > 0U);
 
     bridge.reset();
     triggered = 0U;
