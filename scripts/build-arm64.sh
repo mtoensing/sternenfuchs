@@ -89,6 +89,10 @@ for patch in "$ROOT"/patches/*.patch; do
   git -C "$SRC" apply "$patch"
 done
 python3 "$ROOT/scripts/apply-ra-menu.py" "$SRC"
+python3 "$ROOT/scripts/apply-ra-runtime.py" "$SRC"
+
+# Build the pinned rcheevos static archive used by the live offline runtime.
+bash "$ROOT/scripts/build-rcheevos-arm64.sh"
 
 # The RG40XX H (H700) is a quad-core Cortex-A53 @ 1.5GHz; real-device
 # testing showed the game pegging a single core at 100% while the other
@@ -113,7 +117,10 @@ cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DSTARFOX_BUILD_TESTS=OFF \
   -DSTARFOX_BUILD_TOOLS=OFF \
   -DSTARFOX_ENABLE_XBRZ=OFF \
-  -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF
+  -DSTARFOX_PACKAGE_MSU1_MUSIC=OFF \
+  -DSTERNENFUCHS_RA_ROOT="$ROOT" \
+  -DSTERNENFUCHS_RCHEEVOS_INCLUDE="$ROOT/.work/rcheevos/src/include" \
+  -DSTERNENFUCHS_RCHEEVOS_LIB="$ROOT/.work/rcheevos/librcheevos.a"
 cmake --build "$BUILD" -j"$(nproc)" --target starfox_pc
 
 cp "$BUILD/starfox_pc" "$DIST/sternenfuchs/starfox.aarch64"
