@@ -63,17 +63,7 @@ replace_once(
     [[nodiscard]] bool ra_hardcore_active() const noexcept {
         return ra_hardcore_active_;
     }
-    void set_ra_hardcore_active(bool value) noexcept {
-        ra_hardcore_active_ = value;
-        if (!value) return;
-        set_god_mode(false);
-        infinite_bombs_ = false;
-        infinite_boost_ = false;
-        infinite_lives_ = false;
-        planet_select_cheat_ = false;
-        planet_cheat_active_ = false;
-        selected_level_ = 0U;
-    }
+    void set_ra_hardcore_active(bool value) noexcept;
     [[nodiscard]] std::string_view ra_username() const noexcept {
         return ra_username_;
     }
@@ -93,6 +83,26 @@ replace_once(
     """    bool ra_hardcore_requested_{};
     bool ra_hardcore_active_{};
     std::string ra_username_;
+""")
+
+# Hardcore activation normalizes every known gameplay-altering option using
+# the normal runtime setters so native cartridge-side flags are cleared too.
+replace_once(
+    "src/simulation/game_simulation.cpp",
+    """std::vector<std::uint8_t> GameSimulation::selectable_levels() const {
+""",
+    """void GameSimulation::set_ra_hardcore_active(bool value) noexcept {
+    ra_hardcore_active_ = value;
+    if (!value) return;
+    set_god_mode(false);
+    infinite_bombs_ = false;
+    infinite_boost_ = false;
+    infinite_lives_ = false;
+    set_planet_select_cheat(false);
+    selected_level_ = 0U;
+}
+
+std::vector<std::uint8_t> GameSimulation::selectable_levels() const {
 """)
 
 # Hardcore still allows leaving the Cheats page, but no cheat action may
