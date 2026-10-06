@@ -70,7 +70,8 @@ replace_once(
         infinite_bombs_ = false;
         infinite_boost_ = false;
         infinite_lives_ = false;
-        set_planet_select_cheat(false);
+        planet_select_cheat_ = false;
+        planet_cheat_active_ = false;
         selected_level_ = 0U;
     }
     [[nodiscard]] std::string_view ra_username() const noexcept {
