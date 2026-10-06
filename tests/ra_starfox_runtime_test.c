@@ -193,11 +193,56 @@ static void assert_multi_address_trigger(void) {
   rc_runtime_destroy(&runtime);
 }
 
+static unsigned run_delta_cadence_sequence(int sample_every_phase) {
+  rc_runtime_t runtime;
+  const uint32_t id = 851U;
+  const char* definition =
+      "d0xH0015ba=0_0xH0015ba=1_0x 001ff9=21096";
+  const uint8_t phase_values[] = {0U, 1U, 0U};
+  unsigned phase;
+
+  memset(g_wram, 0, sizeof(g_wram));
+  reset_events();
+  rc_runtime_init(&runtime);
+  assert(rc_runtime_activate_achievement(&runtime, id, definition, NULL, 0) == RC_OK);
+  set_u16le(0x001ff9U, 21096U);
+
+  if (sample_every_phase) {
+    for (phase = 0; phase < 3U; ++phase) {
+      g_wram[0x0015baU] = phase_values[phase];
+      rc_runtime_do_frame(&runtime, event_handler, peek_memory, g_wram, NULL);
+    }
+  } else {
+    /* Model a 20 Hz observer that only sees the beginning and end of the
+       three preserved ~60 Hz cartridge/video phases. The 0->1->0 transient
+       exists, but the middle phase is not evaluated. */
+    g_wram[0x0015baU] = phase_values[0];
+    rc_runtime_do_frame(&runtime, event_handler, peek_memory, g_wram, NULL);
+    g_wram[0x0015baU] = phase_values[2];
+    rc_runtime_do_frame(&runtime, event_handler, peek_memory, g_wram, NULL);
+  }
+
+  phase = g_trigger_count;
+  rc_runtime_destroy(&runtime);
+  return phase;
+}
+
+static void assert_cadence_risk_is_real(void) {
+  const unsigned phase_rate_triggers = run_delta_cadence_sequence(1);
+  const unsigned logic_rate_triggers = run_delta_cadence_sequence(0);
+
+  assert(phase_rate_triggers == 1U);
+  assert(logic_rate_triggers == 0U);
+
+  puts("cadence proof: a real delta achievement can miss a one-phase transient at 20 Hz");
+}
+
 int main(void) {
   assert_all_definitions_activate();
   assert_simple_trigger();
   assert_delta_trigger();
   assert_multi_address_trigger();
+  assert_cadence_risk_is_real();
   puts("Star Fox synthetic-WRAM rcheevos proof: PASS");
   return 0;
 }
