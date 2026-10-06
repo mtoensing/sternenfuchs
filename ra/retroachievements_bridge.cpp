@@ -1,6 +1,7 @@
 #include "ra/retroachievements_bridge.hpp"
 
 #include <array>
+#include <string>
 #include <utility>
 
 extern "C" {
@@ -25,7 +26,7 @@ struct RetroAchievementsBridge::Impl {
     }
 };
 
-thread_local RetroAchievementsBridge::Impl* g_active_impl = nullptr;
+thread_local void* g_active_impl = nullptr;
 
 RetroAchievementsBridge::RetroAchievementsBridge(
     ByteReader reader, TriggerHandler on_trigger)
@@ -83,8 +84,9 @@ void RetroAchievementsBridge::handle_event(
     const rc_runtime_event_t* event) {
     if (!event || event->type != RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED)
         return;
-    if (g_active_impl && g_active_impl->on_trigger)
-        g_active_impl->on_trigger(event->id);
+    auto* impl = static_cast<Impl*>(g_active_impl);
+    if (impl && impl->on_trigger)
+        impl->on_trigger(event->id);
 }
 
 } // namespace sternenfuchs::ra
