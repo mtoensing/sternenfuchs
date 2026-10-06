@@ -21,7 +21,7 @@ Confirmed so far:
 - **All 27 addresses are inside standard SNES 128 KiB WRAM.**
 - No achievement in the analyzed snapshot currently requires an additional save-RAM, VRAM, CGRAM or hardware-register region.
 - Real ROM identification and real-gameplay trigger validation still require access to a user-owned Star Fox ROM.
-- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- No server-side unlock submission is enabled.
+- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- An isolated `RetroAchievementsBridge` now wraps rcheevos runtime activation, phase evaluation, bounded byte reads and local trigger callbacks.\n- A centralized `HardcorePolicy` state model now covers disabled/casual/hardcore modes, clean-entry requirements, save/load gating, cheat gating, scripted-input gating and playback restrictions.\n- Both isolated components are verified by ARM64 CI.\n- No server-side unlock submission is enabled.
 
 ## Architecture
 
@@ -51,7 +51,7 @@ starfox_pc
                 +--> network transport (later)
 ```
 
-RetroAchievements logic should observe truthful emulated/native state. It should not introduce achievement-specific gameplay hooks.
+RetroAchievements logic should observe truthful emulated/native state. It should not introduce achievement-specific gameplay hooks.\n\nImplemented foundation modules:\n\n- `ra/retroachievements_bridge.hpp` / `.cpp`\n- `ra/hardcore_policy.hpp`\n- `ra/ra_memory_adapter.hpp`\n\nThe bridge is still intentionally **not wired into `starfox_pc`**. That keeps the existing game behavior unchanged until the live-ROM validation step.
 
 ## SNES WRAM mapping
 
@@ -258,7 +258,7 @@ enum class AchievementMode {
 };
 ```
 
-All prohibited runtime actions should consult that policy.
+All prohibited runtime actions should consult that policy.\n\nThe isolated policy model is now implemented in `ra/hardcore_policy.hpp`. It defaults to `disabled`, requires a clean session origin before entering Hardcore, forces resumed/diagnostic attempts to Casual, and blocks save/load, cheats, scripted input, direct-stage entry and non-normal playback while Hardcore is active. Fast-forward is deliberately blocked for now until the then-current RA compliance rules are reconfirmed.
 
 Detailed source-level audit: [ra/hardcore-audit.md](ra/hardcore-audit.md)\n\nDetailed implementation belongs to Phase 3 of the project plan.
 
@@ -364,3 +364,43 @@ The smallest convincing proof is:
 4. real gameplay produces the expected memory transition;
 5. rcheevos emits the expected local trigger;
 6. no public unlock is submitted.
+
+
+## Isolated RA bridge and Hardcore policy proof
+
+ARM64 CI run:
+
+https://github.com/mtoensing/sternenfuchs/actions/runs/37474269262
+
+Verified components:
+
+- `ra/retroachievements_bridge.cpp`
+- `tests/ra_bridge_test.cpp`
+- `ra/hardcore_policy.hpp`
+- `tests/ra_hardcore_policy_test.cpp`
+
+The bridge test activates a real Star Fox achievement definition through pinned rcheevos, feeds synthetic WRAM through a bounded callback, evaluates a phase and verifies the local trigger callback.
+
+The policy test verifies:
+
+- default mode is disabled;
+- Casual mode permits existing functionality;
+- resumed/diagnostic sessions cannot enter Hardcore;
+- clean-session Hardcore entry succeeds;
+- save/load is blocked in Hardcore;
+- cheats are blocked in Hardcore;
+- scripted/test input is blocked in Hardcore;
+- direct-stage entry is blocked in Hardcore;
+- slowdown/frame-step/test-super-speed are blocked;
+- returning to Casual restores the permissive policy state.
+
+This proves the policy and RA-runtime abstraction can be built and exercised independently of a ROM, device or Mac.
+
+### Still deliberately not implemented
+
+- no `starfox_pc` integration hook yet;
+- no real `MapVm` instance wired into the bridge yet;
+- no ROM hashing result for a user-owned Star Fox ROM yet;
+- no login/network transport;
+- no public unlock submission;
+- no claim of official Hardcore support.
