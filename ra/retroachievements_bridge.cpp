@@ -15,9 +15,12 @@ struct RetroAchievementsBridge::Impl {
     rc_runtime_t runtime{};
     ByteReader reader;
     TriggerHandler on_trigger;
+    EventHandler on_event;
 
-    Impl(ByteReader r, TriggerHandler h)
-        : reader(std::move(r)), on_trigger(std::move(h)) {
+    Impl(ByteReader r, TriggerHandler h, EventHandler e)
+        : reader(std::move(r)),
+          on_trigger(std::move(h)),
+          on_event(std::move(e)) {
         rc_runtime_init(&runtime);
     }
 
@@ -29,9 +32,11 @@ struct RetroAchievementsBridge::Impl {
 thread_local void* g_active_impl = nullptr;
 
 RetroAchievementsBridge::RetroAchievementsBridge(
-    ByteReader reader, TriggerHandler on_trigger)
+    ByteReader reader,
+    TriggerHandler on_trigger,
+    EventHandler on_event)
     : impl_(std::make_unique<Impl>(
-          std::move(reader), std::move(on_trigger))) {}
+          std::move(reader), std::move(on_trigger), std::move(on_event))) {}
 
 RetroAchievementsBridge::~RetroAchievementsBridge() = default;
 RetroAchievementsBridge::RetroAchievementsBridge(
@@ -61,6 +66,17 @@ void RetroAchievementsBridge::evaluate_phase() {
     g_active_impl = nullptr;
 }
 
+std::optional<RetroAchievementsBridge::MeasuredProgress>
+RetroAchievementsBridge::measured_progress(std::uint32_t id) const {
+    unsigned value = 0U;
+    unsigned target = 0U;
+    if (!rc_runtime_get_achievement_measured(
+            &impl_->runtime, id, &value, &target)) {
+        return std::nullopt;
+    }
+    return MeasuredProgress{value, target};
+}
+
 void RetroAchievementsBridge::reset() {
     rc_runtime_reset(&impl_->runtime);
 }
@@ -85,8 +101,14 @@ void RetroAchievementsBridge::handle_event(
     if (!event || event->type != RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED)
         return;
     auto* impl = static_cast<Impl*>(g_active_impl);
-    if (impl && impl->on_trigger)
+    if (!impl) return;
+    if (impl->on_event) {
+        impl->on_event(Event{event->id, event->value, event->type});
+    }
+    if (event->type == RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED
+        && impl->on_trigger) {
         impl->on_trigger(event->id);
+    }
 }
 
 } // namespace sternenfuchs::ra
