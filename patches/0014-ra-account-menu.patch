@@ -49,7 +49,40 @@ index 0000000..0000000 100644
 --- a/src/simulation/game_simulation.cpp
 +++ b/src/simulation/game_simulation.cpp
 @@
--    if (pregame_page_ == PregamePage::cheats) {
++    if (pregame_page_ == PregamePage::retroachievements
++        && ra_editing_field_ != 0U) {
++        constexpr std::string_view characters{
++            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.abcdefghijklmnopqrstuvwxyz"};
++        bool changed = false;
++        if ((menu_input.pressed & starfox::input::left) != 0U) {
++            ra_edit_char_index_ = (ra_edit_char_index_ + characters.size() - 1U)
++                % characters.size();
++            changed = true;
++        } else if ((menu_input.pressed & starfox::input::right) != 0U) {
++            ra_edit_char_index_ = (ra_edit_char_index_ + 1U) % characters.size();
++            changed = true;
++        }
++        auto& target = ra_editing_field_ == 1U ? ra_username_ : ra_password_;
++        const auto maximum = ra_editing_field_ == 1U ? 20U : 64U;
++        if ((menu_input.pressed & starfox::input::a) != 0U
++            && target.size() < maximum) {
++            target.push_back(characters[ra_edit_char_index_]);
++            changed = true;
++        }
++        if ((menu_input.pressed & starfox::input::y) != 0U && !target.empty()) {
++            target.pop_back();
++            changed = true;
++        }
++        if ((menu_input.pressed & (starfox::input::b | starfox::input::start
++            | starfox::input::select)) != 0U) {
++            ra_editing_field_ = 0U;
++            changed = true;
++        }
++        if (changed) queue_sound_effect(0x11U);
++        result.audio_port_writes = map_.take_apu_port_writes();
++        return result;
++    }
++
 +    if (pregame_page_ == PregamePage::retroachievements) {
 +        const auto activate = (menu_input.pressed & (starfox::input::a
 +            | starfox::input::select | starfox::input::left
@@ -61,9 +94,9 @@ index 0000000..0000000 100644
 +            queue_sound_effect(0x11U);
 +        } else if (activate) {
 +            if (pregame_selection_ == 0U) {
-+                ra_menu_action_ = 1U; // username edit request, handled by host
++                ra_editing_field_ = 1U;
 +            } else if (pregame_selection_ == 1U) {
-+                ra_menu_action_ = 2U; // password edit request, handled by host
++                ra_editing_field_ = 2U;
 +            } else if (pregame_selection_ == 2U) {
 +                ra_hardcore_requested_ = !ra_hardcore_requested_;
 +            }
@@ -103,10 +136,22 @@ index 0000000..0000000 100644
 +                    if (game.pregame_page()
 +                        == starfox::simulation::PregamePage::retroachievements) {
 +                        draw_centred("RETROACHIEVEMENTS", 27, 10U);
-+                        draw_row("USERNAME", "A  EDIT", 60,
-+                            game.pregame_selection() == 0U);
-+                        draw_row("PASSWORD", "A  EDIT", 100,
-+                            game.pregame_selection() == 1U);
++                        const auto editing = game.ra_editing_field();
++                        const auto edit_value = std::string{"ADD "}
++                            + game.ra_edit_character();
++                        const auto username = game.ra_username().empty()
++                            ? std::string{"NOT SET"}
++                            : std::string{game.ra_username()};
++                        draw_row("USERNAME",
++                            editing == 1U ? std::string_view{edit_value}
++                                          : std::string_view{username},
++                            60, game.pregame_selection() == 0U);
++                        draw_row("PASSWORD",
++                            editing == 2U ? std::string_view{edit_value}
++                                : game.ra_password_set()
++                                    ? std::string_view{"********"}
++                                    : std::string_view{"NOT SET"},
++                            100, game.pregame_selection() == 1U);
 +                        draw_row("HARDCORE",
 +                            game.ra_hardcore_requested()
 +                                ? std::string_view{"ON"}
@@ -117,6 +162,10 @@ index 0000000..0000000 100644
 +                        constexpr std::array<std::int32_t, 4> ra_cursor_y{
 +                            63, 103, 143, 183};
 +                        draw_cursor(ra_cursor_y[game.pregame_selection()]);
++                        if (editing != 0U) {
++                            draw_centred("LEFT/RIGHT CHAR  A ADD  Y DELETE  START DONE",
++                                205, 13U);
++                        }
 +                    } else if (game.pregame_page() == starfox::simulation::PregamePage::cheats) {
 @@
                          draw_row("LANGUAGE", language_names[game.language()], 185,
