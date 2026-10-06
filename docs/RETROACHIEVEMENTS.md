@@ -366,6 +366,56 @@ The smallest convincing proof is:
 6. no public unlock is submitted.
 
 
+## In-game RetroAchievements account menu
+
+The Sternenfuchs ARM64 build now applies `scripts/apply-ra-menu.py` to the pinned Star Fox Enhanced source. CI verifies the transform against the exact pinned upstream revision before building.
+
+The desktop/PortMaster setup menu gains:
+
+```text
+OPTIONS
+  -> RETROACHIEVEMENTS
+       USERNAME
+       PASSWORD
+       HARDCORE
+       BACK
+```
+
+Username and password can be entered with controller input:
+
+- Left/Right: select character
+- A: append character
+- Y: delete character
+- Start/Select/B: finish editing
+
+The password is displayed only as `********` once set. Account credentials are deliberately session-only and are not added to Star Fox save-state serialization. The raw password is intended only for the future login exchange; when server authentication is implemented, persist a server-issued token rather than the raw password.
+
+The HARDCORE row currently represents the user's requested mode only. Actual Hardcore activation still has to pass the centralized `HardcorePolicy`, perform the required clean reset and later be accepted by the RA client/server integration.
+
+No login request, credential transmission or public unlock occurs yet.
+
+## Official SNES game hashing
+
+Issue: https://github.com/mtoensing/sternenfuchs/issues/13
+
+Implemented:
+
+- `ra/game_identity.hpp`
+- `ra/game_identity.cpp`
+- `tests/ra_game_identity_test.cpp`
+
+The implementation uses rcheevos' official `rc_hash_initialize_iterator` and `rc_hash_generate(..., RC_CONSOLE_SUPER_NINTENDO, ...)` path.
+
+ARM64 CI proves:
+
+- repeated hashing of the same SNES media is deterministic;
+- a normal unheadered `.sfc` and the equivalent media with a 512-byte copier header as `.smc` resolve to the **same rcheevos identity**, confirming SNES copier-header normalization;
+- missing media fails cleanly;
+- no custom production MD5 implementation is used;
+- hashing performs no login or unlock submission.
+
+The remaining part of #13 requires a user-owned Star Fox ROM: compute its official hash and prove the corresponding RetroAchievements game identity. No ROM bytes or ROM-derived assets will be committed.
+
 ## Isolated RA bridge and Hardcore policy proof
 
 ARM64 CI run:
