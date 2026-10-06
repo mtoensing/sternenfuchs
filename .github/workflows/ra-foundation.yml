@@ -25,6 +25,16 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Verify Sternenfuchs patches against pinned upstream
+        run: |
+          source scripts/versions.sh
+          rm -rf /tmp/starfox-ra-patch-check
+          GIT_LFS_SKIP_SMUDGE=1 git clone "$STARFOX_REPO" /tmp/starfox-ra-patch-check
+          git -C /tmp/starfox-ra-patch-check checkout "$STARFOX_COMMIT"
+          for patch in patches/*.patch; do
+            git -C /tmp/starfox-ra-patch-check apply "$GITHUB_WORKSPACE/$patch"
+          done
+
       - name: Build pinned rcheevos
         run: bash scripts/build-rcheevos-arm64.sh
 
