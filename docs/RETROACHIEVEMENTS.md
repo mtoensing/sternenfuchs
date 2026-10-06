@@ -182,7 +182,7 @@ Before real gameplay is available, the following work can be completed in CI:
 
 This is the preferred work before investing in account login, HTTP, overlays or public unlock submission.
 
-## Evaluation cadence: unresolved
+## Evaluation cadence: working decision established
 
 Sternenfuchs separates presentation frequency from original gameplay logic.
 
@@ -198,7 +198,7 @@ if (game.logic_tick_ready()) {
 }
 ```
 
-The correct RetroAchievements evaluation cadence is therefore **not assumed yet**.
+Offline analysis and ARM64 synthetic testing establish a conservative working decision: evaluate once per preserved SNES/video phase (~60 Hz), not only at the 20 Hz logic tick.
 
 Candidate strategies to test:
 
@@ -209,9 +209,11 @@ Do **not** attach achievement evaluation to arbitrary display/render FPS.
 
 The final decision must be based on whether any real Star Fox achievement depends on transient memory values that could exist between 20 Hz logic ticks.
 
+Detailed analysis: [ra/cadence-analysis.md](ra/cadence-analysis.md)
+
 Tracking issue:
 
-- https://github.com/mtoensing/sternenfuchs/issues/17
+- https://github.com/mtoensing/sternenfuchs/issues/17 (live-ROM validation still open)
 
 ## Hardcore compliance audit
 
@@ -283,7 +285,7 @@ The project must not attempt to bypass RetroAchievements' client approval or gam
 - #14 — expose RA logical WRAM through MapVm — **completed**
 - #15 — inventory current Star Fox achievement addresses — **completed**
 - #16 — verify one real achievement condition against live gameplay
-- #17 — determine correct evaluation cadence\n- #18 — parse real Star Fox definitions against synthetic WRAM — **completed; ARM64 CI PASS**\n- #19 — audit Hardcore-incompatible runtime features — **completed**
+- #17 — determine correct evaluation cadence — **offline proof complete; live validation open**\n- #18 — parse real Star Fox definitions against synthetic WRAM — **completed; ARM64 CI PASS**\n- #19 — audit Hardcore-incompatible runtime features — **completed**
 
 ### Larger phases
 
