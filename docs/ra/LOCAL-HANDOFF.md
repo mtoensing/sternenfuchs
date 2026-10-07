@@ -104,13 +104,15 @@ Use the user's legally obtained Star Fox/Starwing `.sfc` or `.smc`.
 
 Do not copy it into the repository.
 
-Add or use a tiny local-only helper that calls the existing production function:
+Use the prepared helper:
 
-```cpp
-sternenfuchs::ra::hash_snes_file(path)
+```bash
+./scripts/ra-hash-rom.sh /absolute/path/to/StarFox.sfc
 ```
 
-The production path must remain rcheevos:
+It prints only the official RA hash, file size and copier-header detection. It does not copy or modify the ROM.
+
+The production path remains rcheevos:
 
 ```text
 rc_hash_initialize_iterator
