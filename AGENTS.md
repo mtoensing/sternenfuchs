@@ -55,3 +55,20 @@ same change is merged there.
   https://github.com/kandowontu2/starfox-enhanced. The old
   `kandowontu/starfox-enhanced` repository was deleted; do not link it or the
   Software Heritage archive.
+
+
+## RetroAchievements local validation
+
+For any AI/agent continuing the RetroAchievements work with access to a user-owned ROM or the real device, do not restart broad research.
+
+Read and execute:
+
+1. `docs/ra/LOCAL-HANDOFF.md`
+2. `docs/RETROACHIEVEMENTS.md`
+3. `docs/ra/runtime-integration.md`
+
+Current rule: the offline RA evaluator and local Hardcore policy are already linked into the real ARM64 `starfox_pc` build. Do not remove or redesign that integration unless live evidence shows a concrete bug.
+
+The next local validation targets are #13, #16 and #17.
+
+Never commit ROMs, ROM-derived bulk data, RetroAchievements credentials or access tokens. Public/server unlock submission remains disabled until explicit RA eligibility/compliance approval.
