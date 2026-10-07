@@ -1,3 +1,17 @@
+# NOTE — RetroAchievements work
+
+For current RetroAchievements work with local ROM/device access, **do not use this legacy bring-up checklist as the primary task**.
+
+Use:
+
+- `docs/ra/LOCAL-HANDOFF.md`
+- `docs/RETROACHIEVEMENTS.md`
+- `docs/ra/runtime-integration.md`
+
+The device IP/password below are historical bring-up values and may be stale. Discover/confirm current device access before using SSH.
+
+---
+
 # Sternenfuchs — implementation task
 
 Do not restart broad research. The architecture decisions are already made.
