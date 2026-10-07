@@ -2,6 +2,8 @@
 
 This document is the **single entry point** for RetroAchievements work in Sternenfuchs.
 
+For the next AI with local ROM/device access, use [ra/LOCAL-HANDOFF.md](ra/LOCAL-HANDOFF.md) as the execution checklist.
+
 Final target: **official RetroAchievements Hardcore support for the existing SNES Star Fox achievement set**.
 
 Parent issue: https://github.com/mtoensing/sternenfuchs/issues/6  
@@ -21,7 +23,12 @@ Confirmed so far:
 - **All 27 addresses are inside standard SNES 128 KiB WRAM.**
 - No achievement in the analyzed snapshot currently requires an additional save-RAM, VRAM, CGRAM or hardware-register region.
 - Real ROM identification and real-gameplay trigger validation still require access to a user-owned Star Fox ROM.
-- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.\n- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).\n- `RetroAchievementsBridge` is now linked into the actual ARM64 `starfox_pc` runtime. It wraps rcheevos runtime activation, phase evaluation, bounded byte reads, generic runtime events, measured progress and local trigger callbacks.\n- A centralized `HardcorePolicy` state model now covers disabled/casual/hardcore modes, clean-entry requirements, save/load gating, cheat gating, scripted-input gating and playback restrictions.\n- Both isolated components are verified by ARM64 CI.\n- No server-side unlock submission is enabled.
+- The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.
+- Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).
+- `RetroAchievementsBridge` is linked into the actual ARM64 `starfox_pc` runtime and exposes runtime activation, preserved-phase evaluation, bounded byte reads, generic runtime events, measured progress and local trigger callbacks.
+- A centralized `HardcorePolicy` is connected to the real runtime.
+- Full ARM64 runtime integration is green in CI.
+- No server-side unlock submission is enabled.
 
 ## Architecture
 
@@ -51,7 +58,14 @@ starfox_pc
                 +--> network transport (later)
 ```
 
-RetroAchievements logic should observe truthful emulated/native state. It should not introduce achievement-specific gameplay hooks.\n\nImplemented foundation modules:\n\n- `ra/retroachievements_bridge.hpp` / `.cpp`\n- `ra/hardcore_policy.hpp`\n- `ra/ra_memory_adapter.hpp`\n\nThe bridge is still intentionally **not wired into `starfox_pc`**. That keeps the existing game behavior unchanged until the live-ROM validation step.
+RetroAchievements logic should observe truthful emulated/native state. It should not introduce achievement-specific gameplay hooks.\n\nImplemented modules:
+
+- `ra/retroachievements_bridge.hpp` / `.cpp`
+- `ra/hardcore_policy.hpp`
+- `ra/ra_memory_adapter.hpp`
+- `ra/starfox_achievements.hpp`
+
+The bridge is now wired into `starfox_pc` for **offline-only** evaluation. No login, HTTP transport, public unlock submission or official Hardcore credit is enabled.
 
 ## SNES WRAM mapping
 
@@ -134,7 +148,7 @@ Issue:
 
 - https://github.com/mtoensing/sternenfuchs/issues/12
 
-Do not mark #12 complete until a green ARM64 workflow run has actually been observed.
+#12 is complete and closed. ARM64 rcheevos and full runtime builds have been observed green.
 
 ## Best first real achievement tests
 
@@ -200,14 +214,11 @@ if (game.logic_tick_ready()) {
 
 Offline analysis and ARM64 synthetic testing establish a conservative working decision: evaluate once per preserved SNES/video phase (~60 Hz), not only at the 20 Hz logic tick.
 
-Candidate strategies to test:
+The working implementation evaluates once per preserved SNES/video phase.
 
-- one RA evaluation per 20 Hz game logic tick;
-- one RA evaluation per preserved SNES/video phase.
+Do **not** attach achievement evaluation to arbitrary display/render FPS or move it back to 20 Hz logic ticks.
 
-Do **not** attach achievement evaluation to arbitrary display/render FPS.
-
-The final decision must be based on whether any real Star Fox achievement depends on transient memory values that could exist between 20 Hz logic ticks.
+The remaining task is live-ROM validation of this already-selected conservative hook.
 
 Detailed analysis: [ra/cadence-analysis.md](ra/cadence-analysis.md)\n\nLive offline runtime integration: [ra/runtime-integration.md](ra/runtime-integration.md)
 
@@ -236,17 +247,19 @@ Known audit targets include:
 - diagnostic/direct-entry paths;
 - resume/quick-resume semantics.
 
-Examples already confirmed in upstream source include:
+Examples confirmed in the pinned runtime include:
 
 - `GameSimulation::save_state()` and corresponding load-state paths;
 - `set_god_mode(bool)`;
 - `infinite_bombs_`;
 - `infinite_boost_`;
 - `infinite_lives_`;
-- `planet_select_cheat_`;
+- direct selected-level support;
 - `STARFOX_TEST_PRESSES`;
 - `STARFOX_TEST_STATE_ACTIONS`;
 - playback speed multiplier support.
+
+The later upstream Planet Select Cheat is **not present in the pinned revision**, so it is not claimed as a pinned-runtime blocker.
 
 Do not scatter individual RA checks around the codebase. Prefer one authoritative policy object/state such as:
 
@@ -280,7 +293,7 @@ The project must not attempt to bypass RetroAchievements' client approval or gam
 
 ### Foundation
 
-- #12 — build rcheevos on ARM64
+- #12 — build rcheevos on ARM64 — **completed**
 - #13 — identify a real Star Fox ROM with official rcheevos hashing
 - #14 — expose RA logical WRAM through MapVm — **completed**
 - #15 — inventory current Star Fox achievement addresses — **completed**
@@ -448,10 +461,8 @@ This proves the policy and RA-runtime abstraction can be built and exercised ind
 
 ### Still deliberately not implemented
 
-- no `starfox_pc` integration hook yet;
-- no real `MapVm` instance wired into the bridge yet;
 - no ROM hashing result for a user-owned Star Fox ROM yet;
-- no login/network transport;
+- no authenticated network transport;
 - no public unlock submission;
 - no claim of official Hardcore support.
 
