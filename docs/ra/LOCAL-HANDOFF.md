@@ -10,6 +10,8 @@ Read [local-validation-2026-10-08.md](local-validation-2026-10-08.md) before con
 
 The follow-up [retail-core reference comparison](reference-comparison-2026-10-08.md) confirms the mismatch during regular Corneria gameplay. #16 is complete under its explicit mismatch alternative; a live local trigger is still not proven. Additional Hardcore QA mutation paths were guarded; their evidence and remaining coverage are in the negative-test matrix.
 
+See the [feasibility decision](feasibility-2026-10-08.md): #7 exits with an evidence-backed NO for direct set reuse. The reference also observes a real dialogue-definition operand; native dialogue storage is relocated. Official support is additionally subject to the published RA exclusion of unofficial ports.
+
 ## Fixed project state
 
 Repository: `mtoensing/sternenfuchs`
