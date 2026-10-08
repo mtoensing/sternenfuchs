@@ -11,6 +11,8 @@ Full project plan: [RETROACHIEVEMENTS-HARDCORE-PLAN.md](RETROACHIEVEMENTS-HARDCO
 
 ## Current status
 
+Local validation on 2026-10-08: ARM64 foundation tests PASS; supplied US Rev 1 ROM fails the official game-351 supported-hash comparison. Live phases stopped at the identity gate; full runtime build and device validation remain incomplete. See [session evidence](ra/local-validation-2026-10-08.md) and [Hardcore live matrix](ra/hardcore-live-validation.md). No ROM hash is published.
+
 The project is still in the **technical compatibility / offline proof** stage.
 
 Confirmed so far:
