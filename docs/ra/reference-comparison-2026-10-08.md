@@ -53,3 +53,14 @@ The complete 28-operand inventory remains in [starfox-addresses.md](starfox-addr
 - #10/#11/#6 remain gated. Do not implement server submissions, leaderboards or Rich Presence, or request official credit before technical proof.
 
 The next compatibility work requires a general, independently verified retail-state mapping or an explicit project decision about an alternative set. Neither a hard-coded #5158 alias nor manufacturing a trigger resolves this evidence.
+
+## Actual evaluator reference run — 2026-10-08
+
+The same local retail-core harness was extended with the project's pinned ARM64 rcheevos library. It activates all 39 committed definitions and calls `rc_runtime_do_frame()` after every `retro_run()`, with a bounded read-only `RETRO_MEMORY_SYSTEM_RAM` callback. No network operations are present, and the container runs with networking disabled.
+
+```text
+reference activated=39
+reference-local-trigger id=5153
+```
+
+Thus real retail gameplay produces a real local rcheevos event, beyond the earlier matching-operand observation. This is a trigger in the **retail reference**, not Sternenfuchs. The native Corneria trace's direct dialogue operand never reaches that definition's constant, and its independently recorded run emits no trigger. The original native parity gate remains failed; reference success must not be reported as native integration success.

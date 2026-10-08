@@ -47,3 +47,27 @@ A local ARM64 `getenv` interposer delayed the ending fixture until its second st
 | Ending-fixture query after Hardcore becomes active | **2 — unsafe path reached** | **absent — blocked before query** |
 
 The interposer returns `1` on the second `STARFOX_TEST_ENDING` query and an invalid `STARFOX_TEST_ENDING_PREROLL` value, making accidental execution detectable. The old process reached the second query and exited; the fixed process did not query the fixture in Hardcore. Both encounter the previously documented Xvfb/Mesa `GLXBadContext` shutdown limitation, so a clean exit is **not** claimed. The other two mutation sites and unpaced/history guards have source/compile coverage; individual live activation of each fixture remains unverified. Issue #9 remains open for that coverage and device/resume checks.
+
+## Extended execution-site regression — 2026-10-08
+
+The diagnostic-only helper `tests/ra_runtime_qa_query_probe.c` intercepts just twelve named QA environment queries, returns NULL for those names and reports their counts at process exit. It does not intercept credentials, write game memory, supply controller input or ship in the production binary. Compile it separately as an ARM64 shared library (`cc -shared -fPIC ... -ldl`) and use it only through `LD_PRELOAD` in the private runtime test process.
+
+Both old and fixed binaries ran the same real menu recipe: direct Casual Corneria; scripted state action `30:6`; controller presses `60:128,90:2048,120:2048,150:2048,180:128,210:1024,240:1024,270:128`; 1100 presentation frames per runtime. Both logged the clean restart and activated the Hardcore runtime. The old binary predates the extra QA guards; the fixed binary is built from ea37089. Network was disabled.
+
+| QA query | Old count | Fixed count | Interpretation |
+|---|---:|---:|---|
+| ENDING | 2 | 1 | No Hardcore startup fixture query |
+| NUCLEUS_DEFEAT | 4 | 2 | Both mutation-site queries limited to Casual startup |
+| PREROLL_TICKS | 2 | 1 | No Hardcore test preroll |
+| MESSAGE | 2 | 1 | No Hardcore injected-message path |
+| UPGRADE_FLASH | 2 | 1 | No Hardcore fixture object creation |
+| EX_CROSSHAIR | 2 | 1 | No Hardcore fixture WRAM write |
+| TITANIA_END | 2 | 1 | No Hardcore fixture map skip/God Mode |
+| CLEAR | 2 | 1 | No Hardcore fixture map skip/God Mode |
+| UNPACED | 2 | 1 | No Hardcore unpaced environment query |
+| REVIVAL | 1374 | 273 | Queries stop at clean Hardcore restart, including scheduled loop path |
+| SCRAMBLE_WIPE | 1373 | 1372 | Startup mutation query removed; remaining per-frame query is read-only trace logging |
+
+The scheduled revival frame query is not reached because this probe returns NULL for REVIVAL. Its entire mutation path is guarded before that first query; the count comparison verifies that execution-site boundary, not an actual forced death. Likewise this probe proves the startup fixture sites do not execute in Hardcore, rather than activating every possible fixture payload. The earlier delayed ending-payload probe separately verifies a non-NULL fixture case.
+
+These results extend live coverage to all three newly identified mutation sites and unpaced playback. The source audit confirms the remaining SCRAMBLE_WIPE loop only prints interpolated wipe information; it does not write state. The Xvfb/Mesa teardown error remains. Device controls/audio/rendering and KNULLI process suspend/resume remain unverified; #9 stays open for those external checks.
