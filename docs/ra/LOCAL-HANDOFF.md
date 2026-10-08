@@ -317,3 +317,11 @@ The ideal local session ends with evidence for all of:
 5. no public/server unlock is emitted;
 6. documentation and issues are updated;
 7. no ROM/credentials/ROM-derived bulk data enter Git.
+
+## User priority update — 2026-10-08
+
+The user explicitly wants **online RetroAchievements Casual/Softcore unlocks on their RA account**, not a replacement local-only achievement system. Hardcore is not the delivery priority. Do not implement a separate local achievement set as a substitute.
+
+The next technical target is faithful evaluation of the existing online game-351 set through a general verified state mapping, followed by rc_client authentication/game loading and Casual-only submission. Existing offline tests are validation infrastructure, not the user-facing deliverable. Local Hardcore enforcement work must not displace this target.
+
+Casual removes the requirement to deliver competitive Hardcore eligibility, but does not fix the demonstrated native/retail state mismatch. The published Standalone policy requires approval and excludes unofficial ports generally; it does not state a Casual exemption. Whether an existing SNES set may be used through this native hybrid integration remains an unresolved classification question, not an established permission or an individual rejection. Do not disguise the client identity or enable inaccurate unlocks. Public submissions remain gated on verified compatibility and explicit integration eligibility.

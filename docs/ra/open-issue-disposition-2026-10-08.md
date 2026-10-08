@@ -23,3 +23,9 @@ Hardcore: PASS for exercised local enforcement paths / INCOMPLETE platform valid
 Device: NOT RUN — current SSH access unavailable.
 
 No ROMs, ROM hashes, generated assets, screenshots, dumps, tokens or credentials are committed. The query probe logs only fixed QA option names/counts.
+
+## Updated delivery target
+
+User priority is now online RA **Casual/Softcore**, using the RA account and existing Star Fox set. Local-only achievements are rejected as a substitute. Hardcore is optional/deferred. Therefore the active engineering dependency is #8 native/state compatibility -> #10 rc_client online Casual UX. #9 is retained as existing enforcement work but is not the next product milestone. #11 must distinguish integration eligibility from competitive Hardcore approval; Casual does not have a documented exemption from Standalone eligibility.
+
+Primary sources checked: [Standalone Support](https://docs.retroachievements.org/general/standalone-support.html), [Rollout Process](https://docs.retroachievements.org/developer-docs/rollouts.html), and [Casual mode rules](https://docs.retroachievements.org/guidelines/users/global-leaderboard-and-achievement-hunting-rules.html). No request has been sent to RA; contacting third parties requires explicit user authorization.
