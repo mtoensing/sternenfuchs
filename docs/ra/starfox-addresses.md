@@ -5,10 +5,12 @@ The live RetroAchievements game page currently exposes **39** core achievements;
 
 This file deliberately stores only the address inventory, not ROM data.
 
+The embedded definitions in `ra/starfox_achievements.hpp` were re-scanned on 2026-10-08: the earlier 27-address inventory omitted `0x00189C`. The correct count is 28; all remain in WRAM.
+
 ## Result
 
 - Achievements scanned: **39**
-- Unique logical RA addresses: **27**
+- Unique logical RA addresses: **28**
 - Ordinary SNES WRAM range expected by rcheevos: `0x000000..0x01FFFF`
 - Mapping used by Sternenfuchs: `SNES = 0x7E0000 + RA logical address`
 
@@ -36,6 +38,7 @@ This file deliberately stores only the address inventory, not ROM data.
 | `0x0016db` | `0x7E16DB` | 8-bit | #880 Welcome to Warp Zone!; #892 1993: A Strange Odyssey; #2362 Hare-Raising Endurance; #5167 Jackpot!; #5163 Roger, Falco |
 | `0x0016f9` | `0x7E16F9` | 16-bit | #853 Cosmic Climax; #858 Riding a Thin Line |
 | `0x00175f` | `0x7E175F` | 8-bit | #2362 Hare-Raising Endurance |
+| `0x00189c` | `0x7E189C` | 16-bit | #5153; #5154; #5155; #5162; #5156; #5157; #5159; #5179; #5163 |
 | `0x001fbf` | `0x7E1FBF` | 8-bit | #5161 Corneria Champion; #5166 Liberator of Lylat |
 | `0x001fc0` | `0x7E1FC0` | 8-bit | #5166 Liberator of Lylat |
 | `0x001fc1` | `0x7E1FC1` | 8-bit | #5166 Liberator of Lylat |

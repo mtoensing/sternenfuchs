@@ -106,6 +106,7 @@ Current pinned-runtime enforcement includes:
 - infinite boost cleared and blocked;
 - infinite lives cleared and blocked;
 - selected cheat/direct level reset;
+- default-laser cheat cleared on Hardcore entry (live regression fixed on 2026-10-08);
 - Cheats-page mutation blocked;
 - frame freeze/frame-step controls blocked;
 - slowdown/test/super-speed playback paths blocked conservatively;
@@ -135,7 +136,7 @@ server-issued token and persist the token rather than the raw password.
 
 A ROM/device is still required to complete:
 
-- #13: real user ROM -> official rcheevos hash -> RA game identity;
+- #13 identity gate passed on 2026-10-08 using the user-owned base USA NAS ROM and official supported-list matching; see [local report](local-validation-2026-10-08.md).
 - #16: live real achievement condition against Sternenfuchs WRAM;
 - #17: live confirmation of the preserved-phase cadence decision;
 - #8: parity validation against a supported SNES RA environment;

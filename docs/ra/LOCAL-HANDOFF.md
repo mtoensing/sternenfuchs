@@ -4,6 +4,10 @@ This is the execution guide for the next AI with local access to the Sternenfuch
 
 Do not restart broad research. Read this file, then execute the steps in order.
 
+## Latest local evidence — 2026-10-08
+
+Read [local-validation-2026-10-08.md](local-validation-2026-10-08.md) before continuing. The user's base USA NAS ROM passes the game-351 identity gate, but real bomb throws decrement native `SPECWEPCNT` while RA `0x0015AF` stays at 3. Do not assume WRAM bounds imply retail memory parity, and do not add an achievement-specific alias. All 39 embedded definitions use 28 unique operands; the old inventory omitted `0x00189C`. A live default-laser Hardcore leak was fixed and the desktop negative matrix re-tested. Device/reference parity remains open. ROM hashes must not be committed under this user's stricter instruction.
+
 ## Fixed project state
 
 Repository: `mtoensing/sternenfuchs`
@@ -21,8 +25,8 @@ RetroAchievements Star Fox game ID: **351**
 Current offline achievement snapshot:
 
 - 39 achievements
-- 27 unique logical RA addresses
-- 27/27 inside ordinary SNES WRAM
+- 28 unique logical RA addresses
+- 28/28 inside ordinary SNES WRAM
 
 The live ARM64 runtime already contains:
 
@@ -186,7 +190,7 @@ The working architecture decision is already:
 
 Do not move RA evaluation to render FPS or 20 Hz logic ticks.
 
-For the 27 RA-referenced addresses, instrument a compact transition trace during representative gameplay.
+For the 28 RA-referenced addresses, instrument a compact transition trace during representative gameplay.
 
 Goal:
 

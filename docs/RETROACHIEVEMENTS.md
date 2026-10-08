@@ -11,7 +11,7 @@ Full project plan: [RETROACHIEVEMENTS-HARDCORE-PLAN.md](RETROACHIEVEMENTS-HARDCO
 
 ## Current status
 
-Local validation on 2026-10-08: ARM64 foundation tests PASS; supplied US Rev 1 ROM fails the official game-351 supported-hash comparison. Live phases stopped at the identity gate; full runtime build and device validation remain incomplete. See [session evidence](ra/local-validation-2026-10-08.md) and [Hardcore live matrix](ra/hardcore-live-validation.md). No ROM hash is published.
+Local validation on 2026-10-08: the base USA ROM from the user-supplied NAS resolves by official supported-list matching to game 351. ARM64 build/tests pass; live gameplay exposes a bomb-counter mismatch at RA `0x0015AF`. The Hardcore negative matrix passes in the desktop test runtime after fixing a default-laser leak. Cadence/reference parity and device validation remain open. The embedded definitions use 28 WRAM addresses. See [session evidence](ra/local-validation-2026-10-08.md) and [Hardcore live matrix](ra/hardcore-live-validation.md). No ROM hash is published.
 
 The project is still in the **technical compatibility / offline proof** stage.
 
@@ -21,10 +21,10 @@ Confirmed so far:
 - Sternenfuchs' pinned Star Fox Enhanced revision is `6612cb05e4bda0a5e25e8e805d64d0e3db50896a`.
 - The pinned upstream exposes read-only SNES state through `MapVm::peek_ram_byte` / `peek_ram_word`, backed by the 65C816 compatibility layer.
 - The minimal RetroAchievements WRAM adapter has been implemented and unit-tested.
-- The current Star Fox achievement-set snapshot contains **39 achievements** using only **27 unique logical memory addresses**.
-- **All 27 addresses are inside standard SNES 128 KiB WRAM.**
+- The current Star Fox achievement-set snapshot contains **39 achievements** using only **28 unique logical memory addresses**.
+- **All 28 addresses are inside standard SNES 128 KiB WRAM.**
 - No achievement in the analyzed snapshot currently requires an additional save-RAM, VRAM, CGRAM or hardware-register region.
-- Real ROM identification and real-gameplay trigger validation still require access to a user-owned Star Fox ROM.
+- The user-owned base USA NAS ROM passed identification on 2026-10-08; real gameplay revealed a bomb-counter WRAM mismatch, so live achievement parity is not established.
 - The pinned rcheevos runtime activates **39/39** analyzed real Star Fox achievement definitions on ARM64.
 - Synthetic-WRAM tests produce correct local trigger events for a single-value achievement (#5158), a delta/prior achievement (#851), and a multi-address achievement (#880).
 - `RetroAchievementsBridge` is linked into the actual ARM64 `starfox_pc` runtime and exposes runtime activation, preserved-phase evaluation, bounded byte reads, generic runtime events, measured progress and local trigger callbacks.
@@ -108,8 +108,8 @@ Snapshot analyzed:
 
 - RetroAchievements game ID: **351**
 - Core achievements: **39**
-- Unique logical addresses: **27**
-- Addresses inside ordinary WRAM: **27/27**
+- Unique logical addresses: **28**
+- Addresses inside ordinary WRAM: **28/28**
 - Addresses outside ordinary WRAM: **0**
 
 This is currently the strongest positive compatibility signal: the entire analyzed achievement set appears to depend only on the memory region Sternenfuchs already exposes faithfully through the SNES compatibility bridge.
@@ -296,7 +296,7 @@ The project must not attempt to bypass RetroAchievements' client approval or gam
 ### Foundation
 
 - #12 — build rcheevos on ARM64 — **completed**
-- #13 — identify a real Star Fox ROM with official rcheevos hashing
+- #13 — identify a real Star Fox ROM with official rcheevos hashing — **local accepted-ROM proof completed 2026-10-08**
 - #14 — expose RA logical WRAM through MapVm — **completed**
 - #15 — inventory current Star Fox achievement addresses — **completed**
 - #16 — verify one real achievement condition against live gameplay

@@ -1,25 +1,26 @@
-# Hardcore live validation
+# Hardcore live validation — 2026-10-08
 
-Session: 2026-10-08. Baseline `6f6518b36553edc55c51ba345879ef7ed72c09ce`.
+Environment: actual ARM64 `starfox_pc`, pinned upstream/rcheevos, accepted user-owned ROM, Ubuntu 22.04 + Xvfb + SDL shim/native renderer fallback, network disabled. State/rejection logging was temporary in the isolated validation source and is not shipped. This is local enforcement evidence, not official Hardcore approval or RG40XX-H validation.
 
-**Live validation not completed.** The real ROM failed the game-351 supported-identity gate, so the explicit Phase B stop rule prevented runtime tests. Isolated ARM64 policy tests passed, but cannot establish any live row below. Official Hardcore support is not claimed.
+Before enabling Hardcore, the real Cheat menu enabled God Mode, all three infinite options, laser and level 11. After the laser fix, the clean BOOT reconstruction cleared all six; subsequent menu/host-key attempts and mode lifecycle were checked from actual runtime logs.
 
-| Test | Live result | Reason |
+| Test | Result | Evidence |
 |---|---|---|
-| Entering Hardcore performs a clean BOOT reconstruction | NOT RUN | Phase B identity gate |
-| God Mode cannot be enabled | NOT RUN | Phase B identity gate |
-| Infinite Bombs cannot be enabled | NOT RUN | Phase B identity gate |
-| Infinite Boost cannot be enabled | NOT RUN | Phase B identity gate |
-| Infinite Lives cannot be enabled | NOT RUN | Phase B identity gate |
-| Selected/direct cheat level is OFF | NOT RUN | Phase B identity gate |
-| Save state is rejected | NOT RUN | Phase B identity gate |
-| Load state is rejected | NOT RUN | Phase B identity gate |
-| Slot selector/state UI cannot bypass restrictions | NOT RUN | Phase B identity gate |
-| Frame freeze/frame step is rejected | NOT RUN | Phase B identity gate |
-| Accelerated/test playback cannot affect eligible session | NOT RUN | Phase B identity gate |
-| Scripted test input is blocked | NOT RUN | Phase B identity gate |
-| Scripted state actions are blocked | NOT RUN | Phase B identity gate |
-| Disabling Hardcore switches to Casual | NOT RUN | Phase B identity gate |
-| Re-enabling Hardcore requires another clean restart | NOT RUN | Phase B identity gate |
+| Entering Hardcore performs clean BOOT reconstruction | PASS | Clean restart log, active Hardcore runtime, BOOT setup render. |
+| God Mode cannot be enabled | PASS | Cheat-menu mutation and Ctrl+Alt+F12 attempted; god remains 0. |
+| Infinite Bombs cannot be enabled | PASS | Cheats row 3 activated; bombs remains 0. |
+| Infinite Boost cannot be enabled | PASS | Cheats row 4 activated; boost remains 0. |
+| Infinite Lives cannot be enabled | PASS | Cheats row 5 activated; lives remains 0. |
+| Selected/direct cheat level is OFF | PASS | Casual level 11 becomes 0 on reconstruction; row 1 cannot enable it. |
+| Save state is rejected | PASS | Ctrl+F1: explicit runtime reject, scancode 58. |
+| Load state is rejected | PASS | Ctrl+F2: explicit runtime reject, scancode 59. |
+| Slot selector/state UI cannot bypass restriction | PASS | Ctrl+F3: explicit runtime reject, scancode 60. |
+| Frame freeze/frame step is rejected | PASS | F5/F6/F7 attempted; frozen=0 and following menu/tick progression continues. |
+| Accelerated/test playback cannot affect eligible session | PASS | STARFOX_TEST_FAST_FORWARD requested; effective factor 1 in Hardcore. |
+| Scripted test input does not execute | PASS | 21 configured input entries become 0 after Hardcore reconstruction. |
+| Scripted state actions do not execute | PASS | 4 configured actions become 0 after Hardcore reconstruction. |
+| Disabling Hardcore switches to Casual | PASS | switched to casual; active changes to 0 without restart. |
+| Re-enabling Hardcore requires another clean restart | PASS | Second clean restart request followed by active=1, normalized flags. |
+| Previously enabled default laser is cleared | FAIL → PASS | Before fix laser=1 survived; set_default_laser(0U) makes identical re-test laser=0. |
 
-See [session report](local-validation-2026-10-08.md) for concrete build, ROM identity and device results. No restrictions were weakened.
+The process ended with `GLXBadContext` during virtual graphical teardown. Actual device audio/controller/rendering and exhaustive unlisted bypasses remain unverified; #9 stays open. See [session report](local-validation-2026-10-08.md).

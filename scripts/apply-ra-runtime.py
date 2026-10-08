@@ -99,6 +99,7 @@ replace_once(
     infinite_boost_ = false;
     infinite_lives_ = false;
     selected_level_ = 0U;
+    set_default_laser(0U);
 }
 
 std::vector<std::uint8_t> GameSimulation::selectable_levels() const {

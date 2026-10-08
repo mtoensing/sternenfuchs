@@ -110,7 +110,7 @@ Therefore the preserved video-phase cadence is the lower-risk default unless rea
 
 Issue #17 should remain open until a real ROM/runtime trace answers:
 
-1. Do any of the 27 RA-referenced addresses change between 20 Hz logic ticks?
+1. Do any of the 28 RA-referenced addresses change between 20 Hz logic ticks?
 2. Do any such values transition through achievement-significant states for only one or two video phases?
 3. Does evaluating at the recommended phase hook match a known-good SNES RA client/core?
 
