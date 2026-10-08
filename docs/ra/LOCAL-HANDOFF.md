@@ -8,6 +8,8 @@ Do not restart broad research. Read this file, then execute the steps in order.
 
 Read [local-validation-2026-10-08.md](local-validation-2026-10-08.md) before continuing. The user's base USA NAS ROM passes the game-351 identity gate, but real bomb throws decrement native `SPECWEPCNT` while RA `0x0015AF` stays at 3. Do not assume WRAM bounds imply retail memory parity, and do not add an achievement-specific alias. All 39 embedded definitions use 28 unique operands; the old inventory omitted `0x00189C`. A live default-laser Hardcore leak was fixed and the desktop negative matrix re-tested. Device/reference parity remains open. ROM hashes must not be committed under this user's stricter instruction.
 
+The follow-up [retail-core reference comparison](reference-comparison-2026-10-08.md) confirms the mismatch during regular Corneria gameplay. #16 is complete under its explicit mismatch alternative; a live local trigger is still not proven. Additional Hardcore QA mutation paths were guarded; their evidence and remaining coverage are in the negative-test matrix.
+
 ## Fixed project state
 
 Repository: `mtoensing/sternenfuchs`

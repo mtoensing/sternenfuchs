@@ -14,7 +14,7 @@ The embedded definitions in `ra/starfox_achievements.hpp` were re-scanned on 202
 - Ordinary SNES WRAM range expected by rcheevos: `0x000000..0x01FFFF`
 - Mapping used by Sternenfuchs: `SNES = 0x7E0000 + RA logical address`
 
-**All referenced addresses are inside ordinary 128 KiB SNES WRAM.** This is an excellent compatibility signal for Sternenfuchs' existing `MapVm::peek_ram_byte` bridge.
+**All referenced addresses are inside ordinary 128 KiB SNES WRAM.** This establishes readable bounds only. A retail-core comparison proves that `0x0015AF` has incompatible semantics in the native runtime; see [reference comparison](reference-comparison-2026-10-08.md).
 
 ## Addresses
 

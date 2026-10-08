@@ -372,3 +372,34 @@ replace_once(
 """)
 
 print("Applied Sternenfuchs live RetroAchievements runtime integration")
+
+# QA fixtures can write WRAM, force deaths, skip bosses or enable god mode.
+# Keep them available in Casual, but guard them at their execution sites after
+# the clean restart has resolved the authoritative mode.
+for old in (
+    '        if (std::getenv("STARFOX_TEST_FRAMES") != nullptr\n            && std::getenv("STARFOX_TEST_ENDING") != nullptr) {',
+    '        if (std::getenv("STARFOX_TEST_FRAMES") != nullptr) {\n            if (std::getenv("STARFOX_TEST_NUCLEUS_DEFEAT") != nullptr)',
+    '            if(test_frames && std::getenv("STARFOX_TEST_REVIVAL")\n',
+):
+    new = old.replace('if (', 'if (ra_test_gameplay_allowed && ', 1) if 'if (' in old else old.replace('if(', 'if(ra_test_gameplay_allowed && ', 1)
+    replace_once('src/app/starfox_pc.cpp', old, new)
+
+replace_once(
+    'src/app/starfox_pc.cpp',
+    '        // Explicit headless QA entry: run the real post-Andross continuation\n',
+    '''#if defined(STERNENFUCHS_RA_ENABLED)
+        const bool ra_test_gameplay_allowed = ra_policy.can_use_scripted_input();
+        if (!ra_test_gameplay_allowed) presentation_history.reset();
+#else
+        constexpr bool ra_test_gameplay_allowed = true;
+#endif
+        // Explicit headless QA entry: run the real post-Andross continuation
+''')
+replace_once(
+    'src/app/starfox_pc.cpp',
+    '        const auto test_unpaced = std::getenv("STARFOX_TEST_UNPACED") != nullptr;',
+    '        const auto test_unpaced = ra_test_gameplay_allowed\n            && std::getenv("STARFOX_TEST_UNPACED") != nullptr;')
+replace_once(
+    'src/app/starfox_pc.cpp',
+    '                if (toggle_rewind_key) {',
+    '                if (toggle_rewind_key && ra_test_gameplay_allowed) {')
