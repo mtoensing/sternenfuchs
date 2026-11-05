@@ -44,7 +44,28 @@ set -- $ARGS
 
 ES_PID="$(pgrep -f 'exit-on-reboot-required' | head -1)"
 resume_es() { [ -n "$ES_PID" ] && kill -CONT "$ES_PID" 2>/dev/null || true; }
-trap resume_es EXIT
+# Loading a benchmark state can persist its presentation/timing options on
+# exit. Every run must start from the user's original configuration, including
+# when comparing binaries or verifying frame digests from a cold start.
+CFG_BACKUP="$(mktemp -d /tmp/sternenfuchs-bench.XXXXXXXX)" || exit 1
+if [ -f pregame.cfg ]; then
+  cp -p pregame.cfg "$CFG_BACKUP/pregame.cfg" || exit 1
+fi
+cleanup() {
+  local status=$?
+  if [ -f "$CFG_BACKUP/pregame.cfg" ]; then
+    cp -p "$CFG_BACKUP/pregame.cfg" pregame.cfg || status=1
+    rm -- "$CFG_BACKUP/pregame.cfg"
+  elif [ -f pregame.cfg ]; then
+    rm -- pregame.cfg || status=1
+  fi
+  rmdir "$CFG_BACKUP"
+  resume_es
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 [ -n "$ES_PID" ] && kill -STOP "$ES_PID" 2>/dev/null || true
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64"

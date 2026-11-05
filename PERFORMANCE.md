@@ -169,6 +169,52 @@ this port's existing row-wise optimization; it is not an additional speedup to
 apply here. See `docs/ENDING-VALIDATION.md` for correctness evidence. The older
 performance tables above remain historical measurements of their stated builds.
 
+## Current-runtime PGO refresh — 2026-11-05
+
+The original-ending-fix baseline (`571457e`) was built without stale profiles.
+Its current code, including the existing offline RA integration, has now been
+profiled on the RG40XX H again. The refreshed 64 runtime profiles in `pgo-data/`
+cover heavy Corneria, a cold start through menus into flight, and the credits
+restart. See `pgo-data/README.md` for toolchain, paths and collection details.
+
+Controlled A/B: both binaries run from the same game directory with the same
+assets/settings, replaying the same existing `heavy` state and scripted input.
+Three 600-frame measured runs per build, each after 150 warm-up frames, were
+interleaved baseline/PGO/PGO/baseline/baseline/PGO. The CPU was temporarily held
+at its supported 1512 MHz for comparison; every run reports min/median/max 1512.
+The original `schedutil` governor was restored afterwards.
+
+Means of the three runs, milliseconds unless specified:
+
+| Measurement | Ending-fix baseline | Refreshed PGO | Change |
+| --- | ---: | ---: | ---: |
+| Logic work per tick | 4.27 | 3.54 | 17% less time |
+| Background per presented frame | 1.69 | 1.57 | 7% less time |
+| World rasterizer per presented frame | 1.22 | 0.96 | 22% less time |
+| Indexed-to-RGBA expansion | 0.27 | 0.24 | 13% less time |
+| Presentation FPS | 59.81 | 59.86 | already display/pacer limited |
+| p95 frame interval, run range | 16.96–17.03 | 16.90–16.93 | small improvement |
+
+This buys CPU headroom at the existing presentation rate. It does not establish
+performance across every stage or a battery-life improvement. The CPU renderer,
+resolution, simulation timing and audio pipeline have not been changed.
+
+The PGO build passes the complete original-ending regression suite in ARM64
+Linux, including both timing modes, the long final-score idle and post-ending
+Armada comparison. The credits START regression also passes on the device.
+The device's `heavy` (660 frames/220 audio ticks) and cold-start `boot`
+(2460 frames/820 audio ticks) verification runs produce identical indexed-video,
+final-RGBA and audio digests between the baseline and PGO build. Both binaries
+use the same game directory and restored options for these comparisons.
+Private logs are under `device-logs/pgo-20261105/controlled/`.
+
+The verified PGO binary's SHA-256 is
+`d6970486e24ef71a266368db792a11e10d4ffb93076f0c18e023e4809b14c88e`.
+
+The benchmark harness now backs up and restores `pregame.cfg` on normal exit,
+failure and handled interruption. Loading a saved benchmark state must not
+silently change the user's options or the next cold-start comparison.
+
 ## Tools
 
 * `scripts/dev-build.sh` - incremental aarch64 build in Docker (same flags/PGO
