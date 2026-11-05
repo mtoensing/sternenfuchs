@@ -57,18 +57,16 @@ same change is merged there.
   Software Heritage archive.
 
 
-## RetroAchievements local validation
+## PortMaster runtime and retired RetroAchievements experiment
 
-For any AI/agent continuing the RetroAchievements work with access to a user-owned ROM or the real device, do not restart broad research.
+The user retired the unsuccessful RA integration on 2026-11-05. Production
+PortMaster binaries must exclude the RA evaluator, rcheevos, account/Hardcore
+code and RA menu. Do not apply `scripts/apply-ra-menu.py` or
+`scripts/apply-ra-runtime.py`, or link rcheevos, in the production build.
+`scripts/verify-portmaster-runtime.sh` checks the artifact before packaging.
 
-Read and execute:
+The files under `ra/`, `tests/ra_*` and `docs/ra/` are historical research;
+their old integration/continuation instructions do not override this release
+policy. Resume that experiment only if the user explicitly requests it.
 
-1. `docs/ra/LOCAL-HANDOFF.md`
-2. `docs/RETROACHIEVEMENTS.md`
-3. `docs/ra/runtime-integration.md`
-
-Current rule: the offline RA evaluator and local Hardcore policy are already linked into the real ARM64 `starfox_pc` build. Do not remove or redesign that integration unless live evidence shows a concrete bug.
-
-The next local validation targets are #13, #16 and #17.
-
-Never commit ROMs, ROM-derived bulk data, RetroAchievements credentials or access tokens. Public/server unlock submission remains disabled until explicit RA eligibility/compliance approval.
+Never commit ROMs, ROM-derived bulk data, RA credentials or access tokens.

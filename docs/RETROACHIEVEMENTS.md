@@ -1,5 +1,10 @@
 # RetroAchievements integration status
 
+**2026-11-05: retired from the PortMaster release.** The user abandoned the
+unsuccessful integration. Production builds exclude the RA menu, evaluator,
+Hardcore/account code and rcheevos. The material below records the historical
+experiment; it is not a release feature or an instruction to restore it.
+
 This document is the **single entry point** for RetroAchievements work in Sternenfuchs.
 
 For the next AI with local ROM/device access, use [ra/LOCAL-HANDOFF.md](ra/LOCAL-HANDOFF.md) as the execution checklist.

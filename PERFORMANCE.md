@@ -172,10 +172,11 @@ performance tables above remain historical measurements of their stated builds.
 ## Current-runtime PGO refresh — 2026-11-05
 
 The original-ending-fix baseline (`571457e`) was built without stale profiles.
-Its current code, including the existing offline RA integration, has now been
-profiled on the RG40XX H again. The refreshed 64 runtime profiles in `pgo-data/`
-cover heavy Corneria, a cold start through menus into flight, and the credits
-restart. See `pgo-data/README.md` for toolchain, paths and collection details.
+That code was profiled on the RG40XX H again. The collection initially contained
+64 runtime profiles covering heavy Corneria, a cold start through menus into
+flight, and the credits restart. The unused experimental bridge profile was
+subsequently removed; 63 shared profiles remain. See `pgo-data/README.md` for
+toolchain, paths and collection details.
 
 Controlled A/B: both binaries run from the same game directory with the same
 assets/settings, replaying the same existing `heavy` state and scripted input.
@@ -214,6 +215,31 @@ The verified PGO binary's SHA-256 is
 The benchmark harness now backs up and restores `pregame.cfg` on normal exit,
 failure and handled interruption. Loading a saved benchmark state must not
 silently change the user's options or the next cold-start comparison.
+
+## Production correction: retired experiment excluded — 2026-11-05
+
+The production runtime is built from the pinned source plus patches 0001–0014,
+without the retired account/menu/evaluator transforms or rcheevos linkage.
+`scripts/verify-portmaster-runtime.sh` checks symbols and strings before
+packaging; it rejects the former artifact and passes the replacement.
+
+The replacement passes the full original-ending suite in ARM64 Linux and the
+credits START test on the RG40XX H. On the device, its indexed-video, final-RGBA
+and audio digests match the prior build for both `heavy` (660 frames/220 audio
+ticks) and `boot` (2460 frames/820 audio ticks), using identical saved options.
+The retired menu/evaluator is absent from the replacement binary.
+
+A fresh controlled three-run comparison at 1512 MHz, with the same 600 measured
+frames and 150-frame warm-up as above, verifies the RA-free replacement:
+logic work per tick is 4.25 -> 3.60 ms (15% less time), world rasterization is
+1.23 -> 0.96 ms (22% less time), and presentation remains 59.83 -> 59.84 FPS.
+The original governor and saved options are restored afterwards. These are the
+figures for the final production replacement; the earlier table describes the
+superseded candidate.
+
+Replacement SHA-256:
+`2930700103296bbf7c694c3938b8a249000716c1494e5def449db78c4e939476`.
+Private evidence is under `device-logs/no-ra-20261105/`.
 
 ## Tools
 

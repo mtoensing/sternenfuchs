@@ -1,18 +1,7 @@
-name: ra-foundation
+name: ra-foundation (manual research)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "ra/**"
-      - "tests/ra_*"
-      - "scripts/build-rcheevos-arm64.sh"
-      - "scripts/build-arm64.sh"
-      - "scripts/apply-ra-menu.py"
-      - "scripts/apply-ra-runtime.py"
-      - "scripts/versions.sh"
-      - ".github/workflows/ra-foundation.yml"
 
 jobs:
   arm64-foundation:
@@ -64,7 +53,7 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Build transformed Sternenfuchs runtime
+      - name: Build production Sternenfuchs runtime
         env:
           STARFOX_PGO_PHASE: none
         run: ./scripts/build-arm64.sh
