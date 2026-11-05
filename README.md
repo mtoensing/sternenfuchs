@@ -7,3 +7,6 @@ PortMaster/aarch64, initially tested on an Anbernic RG40XX H running KNULLI.
 No ROM or ROM-derived assets belong in this repository. You have to supply your
 own legally obtained Star Fox/Starwing ROM: put it next to the launcher in
 `ports/sternenfuchs/` on the device (see `portmaster/sternenfuchs/your rom here.txt`).
+
+The original-game ending fixes and their regression checks are documented in
+[docs/ENDING-VALIDATION.md](docs/ENDING-VALIDATION.md).

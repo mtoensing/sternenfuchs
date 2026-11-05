@@ -155,12 +155,19 @@ expose). VSync/swap blocking is reported as `profile-present-blocking`.
 
 ## Upstream (kandowontu2/starfox-enhanced)
 
-27 commits ahead of the pinned `6612cb05`; the source changes are visual
+Historical comparison (2026-09-29): 27 commits ahead of the pinned `6612cb05`; the source changes were visual
 enhancements (backdrops, environment effects, FSR, touch overlay) and release
 CI. The only performance items are GPU-path model upload scratch reuse and
 `SDL_DelayPrecise` for the pacer, neither of which touches this
 CPU-raster/GLES path (the pacer sleeps ~0 ms here; frames are paced by the
-swap). Nothing was ported.
+swap). Nothing was ported in that comparison.
+
+2026-11-05: upstream is now 239 commits ahead of the pin. Patch 0014 selectively
+backports original-game ending/restart corrections without changing the pin or
+the CPU/GLES renderer. Upstream's newer CPU layer compositor explicitly adapts
+this port's existing row-wise optimization; it is not an additional speedup to
+apply here. See `docs/ENDING-VALIDATION.md` for correctness evidence. The older
+performance tables above remain historical measurements of their stated builds.
 
 ## Tools
 

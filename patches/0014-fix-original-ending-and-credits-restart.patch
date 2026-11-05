@@ -1,0 +1,377 @@
+From: Sternenfuchs maintainers
+Subject: [PATCH] Fix original ending presentation and clean credits restart
+
+Backported from kandowontu2/starfox-enhanced: 4252643, 099cb233,
+ee6e92c6. Keep the pinned runtime and downstream ARM64/RA integration.
+
+diff --git a/src/simulation/game_simulation.cpp b/src/simulation/game_simulation.cpp
+--- a/src/simulation/game_simulation.cpp
++++ b/src/simulation/game_simulation.cpp
+@@ -1,5 +1,6 @@
+ #include "starfox/render/pixel_filter.hpp"
+ #include "starfox/simulation/game_simulation.hpp"
++#include "starfox/simulation/source_painter_order.hpp"
+
+ #include "starfox/assets/decrunch.hpp"
+ #include "starfox/input/buttons.hpp"
+@@ -54,6 +54,30 @@
+
+ std::int16_t signed_word(std::uint16_t value) noexcept {
+     return std::bit_cast<std::int16_t>(value);
++}
++
++template<class Map>
++auto ending_painter_order(Map& map,const assets::RomImage& rom,const ObjectPool& objects,
++    std::uint32_t view_position,std::uint32_t world_matrix) {
++    const std::array<std::int16_t,3> camera{
++        signed_word(map.read_native_word(view_position)),
++        signed_word(map.read_native_word(view_position+2)),
++        signed_word(map.read_native_word(view_position+4))};
++    MatrixQ15 world{};
++    for(unsigned i=0;i<world.size();++i) world[i]=signed_word(map.read_native_word(world_matrix+i*2));
++    auto handles=objects.active_handles();
++    std::erase_if(handles,[&](ObjectHandle handle) {
++        return (objects.at(handle).strategy_flags[3]&0x08U)!=0;
++    });
++    return source_painter_order(handles,[&](ObjectHandle handle) {
++        const auto& object=objects.at(handle);
++        const auto position=transform_q15(world,{subtract16(object.world_x,camera[0]),
++            subtract16(object.world_y,camera[1]),subtract16(object.world_z,camera[2])});
++        auto depth=position[2];
++        if(object.shape) depth=add16(depth,rom.read_i16(std::uint32_t(object.shape)+5));
++        if(object.type&1U) depth=add16(depth,15'000);
++        return depth;
++    });
+ }
+
+ input::ButtonMask map_control_type_buttons(
+@@ -3431,7 +3455,16 @@
+ GameTickResult GameSimulation::tick_end_game_sequence(
+     const input::TickInput& input) {
+     constexpr std::uint32_t spc_clocks_per_tick = 1'024'000U / 20U;
+-    write_input(input);
++    auto native_input=input;
++    if(ending_final_score_) {
++        // TRANSFER_L still runs the completed credits map while the total
++        // score task is suspended. Its START tail jump must not reset that
++        // live host call stack; accept the original input at the host handoff.
++        native_input.held&=~starfox::input::start;
++        native_input.pressed&=~starfox::input::start;
++        native_input.released&=~starfox::input::start;
++    }
++    write_input(native_input);
+     GameTickResult result;
+     for (std::size_t phase = 0; phase < current_tick_video_phases_; ++phase) {
+         map_.set_apu_clock_offset(static_cast<std::uint32_t>(
+@@ -3466,8 +3499,34 @@
+     // The native transfer has already run GETVIEW_L, including its fixed-
+     // position/target camera and Super FX matrix calls. Do not call the host
+     // camera path here: its bounded angle subroutines would replace the
+-    // suspended ending task's CPU registers and return stack.
+-    draw_order_ = objects_.active_handles();
++    // suspended ending task's CPU registers and return stack. But allocation
++    // order is not painter order: it let ships overwrite stage percentages.
++    // Reuse the source depth/bias/CMP rule without culling or mutating objects.
++    draw_order_ = ending_painter_order(map_,*rom_,objects_,view_position_,world_matrix_);
++    // ENDSEQ_L runs its own ENDTRANS loop, including DO_CIRCLE_EXPLOSION_L.
++    // Unlike a gameplay TRANSFER it never reaches the host's normal circle
++    // snapshot below, so the boss dossier's round wipes were silently lost.
++    // Its mroundwipeclear program is screen-centred rather than object-led.
++    if (boss_roll_active()) {
++        circle_effect_ = {
++            map_.read_native_word(circle_animation_) != 0U
++                && map_.read_native_byte(do_a_wipe_) == 0U,
++            128, 112,
++            map_.read_native_word(circle_radius_),
++            map_.read_native_byte(circle_source_red_),
++            map_.read_native_byte(circle_source_green_),
++            map_.read_native_byte(circle_source_blue_),
++            map_.read_native_byte(circle_affected_layers_),
++        };
++        // ENDTRANS runs DO_WINDOW_WIPE_L itself, not the host gameplay
++        // transfer. Capture its window logic before shared Super FX scratch
++        // is reused, just as the gameplay transfer does below.
++        if (map_.read_native_byte(do_a_wipe_) != 0U) {
++            wipe_logic_snapshot_ = map_.read_native_byte(wipe_logic_);
++        }
++    } else {
++        circle_effect_ = {};
++    }
+     // ENDSEQ uploads E-TEST's palette directly to CGRAM, then SETPAL_L sets
+     // the 3D row. Its IRQs deliberately do NOT copy PAL0PALETTE (the preceding
+     // space scene). Doing so repainted the boss dossier white/brown.
+@@ -5329,6 +5388,10 @@
+         pending_end_game_ = false;
+         credits_complete_ = false;
+         reset_scene_transition_state();
++        // The native RESTART clears this through INITIALISE_RAM. Our host
++        // handoff must retire CREDITS' fixed scroll too, or title/tunnel
++        // graphics inherit the ending's BG2 override (upstream #68).
++        map_.write_native_byte(ram_symbol("BG2VOFSOVERRIDE"), 0U);
+         write_input({});
+         Wdc65816Registers registers;
+         registers.status = 0x24U;
+@@ -5543,8 +5606,13 @@
+                 | starfox::input::select))
+             == (starfox::input::left_shoulder | starfox::input::select);
+     auto native_input = input;
+-    if (flow_state_ == GameFlowState::title && !ex_title_logo_active) {
+-        // The PC front end owns the title-screen START transition. The EX
++    if ((flow_state_ == GameFlowState::title && !ex_title_logo_active)
++        || flow_state_ == GameFlowState::credits
++        || (flow_state_ == GameFlowState::finished && credits_complete_)) {
++        // The host owns title and completed-credits START transitions. Never
++        // allow CREDITS' RESTART tail jump to enter the persistent outer loop
++        // from a bounded UPDATE_OBJECTS_L call, including the final wait's
++        // transfer before credits_complete_ has been observed. The EX
+         // title map handles the same edge by entering TRANSFER_L and then
+         // tail-jumping into its persistent special-menu loop. Following that
+         // second main loop from this bounded UPDATE_OBJECTS_L call can never
+diff --git a/include/starfox/simulation/source_painter_order.hpp b/include/starfox/simulation/source_painter_order.hpp
+new file mode 100644
+--- /dev/null
++++ b/include/starfox/simulation/source_painter_order.hpp
+@@ -0,0 +1,25 @@
++#pragma once
++#include <cstdint>
++#include <vector>
++
++namespace starfox::simulation {
++// The cartridge uses stable insertion and a wrapping 16-bit CMP/BPL, not a
++// C++ total-order sort. Keep this presentation-only: never relink/remove the
++// native object pool or recalculate the suspended task's camera.
++template<class Range,class Depth>
++auto source_painter_order(const Range& handles,Depth depth) {
++    using Handle=typename Range::value_type;
++    struct Entry {Handle handle;std::int16_t depth;};
++    std::vector<Entry> entries;
++    for(const auto handle:handles) {
++        const Entry current{handle,depth(handle)};
++        auto at=entries.begin();
++        while(at!=entries.end()
++            && !(std::uint16_t(std::uint16_t(at->depth)-std::uint16_t(current.depth))&0x8000U)) ++at;
++        entries.insert(at,current);
++    }
++    std::vector<Handle> result;result.reserve(entries.size());
++    for(const auto& entry:entries) result.push_back(entry.handle);
++    return result;
++}
++}
+diff --git a/tests/ending_tests.cpp b/tests/ending_tests.cpp
+--- a/tests/ending_tests.cpp
++++ b/tests/ending_tests.cpp
+@@ -1,8 +1,11 @@
+ #include "starfox/assets/rom.hpp"
+ #include "starfox/audio/spc700_audio.hpp"
+ #include "starfox/input/buttons.hpp"
++#include "starfox/render/background_renderer.hpp"
+ #include "starfox/simulation/game_simulation.hpp"
+-
++#include "starfox/simulation/source_painter_order.hpp"
++
++#include <algorithm>
+ #include <array>
+ #include <iostream>
+ #include <memory>
+@@ -13,6 +16,19 @@
+ namespace {
+ void require(bool condition, const std::string& message) {
+     if (!condition) throw std::runtime_error(message);
++}
++void check_painter_order() {
++    using starfox::simulation::source_painter_order;
++    const std::vector<unsigned> handles{0,1,2,3};
++    const std::array<std::int16_t,4> depths{100,500,100,200};
++    require(source_painter_order(handles,[&](auto h){return depths[h];})
++        ==std::vector<unsigned>{1,3,0,2},"Ending paint order ignores depth or equal-depth stability");
++    const std::vector<unsigned> pair{0,1};
++    const std::array<std::int16_t,2> wrapping{-32768,32767};
++    require(source_painter_order(pair,[&](auto h){return wrapping[h];})==pair,
++        "Ending painter order replaced source wrapping CMP with an ordinary signed sort");
++    require(handles==std::vector<unsigned>{0,1,2,3},"Painter ordering mutated native pool order");
++    std::cout<<"Ending painter order: depth, stable ties, wrapping CMP and native-pool preservation passed\n";
+ }
+
+ void check_ending_irq(const starfox::assets::RomImage& rom,
+@@ -177,6 +193,7 @@
+     bool camera_orbit = false, camera_close = false, voice = false;
+     bool average_value = false, final_total = false, final_average = false;
+     bool boss_text_typed = false, boss_palette_checked = false;
++    bool boss_round_wipe_seen = false;
+     std::set<unsigned> seen_bosses, credits_text;
+     std::array<unsigned, 6> boss_first_tick{}, boss_initial_count{};
+     const auto credits_map = address("CREDITSMAP");
+@@ -236,6 +253,10 @@
+             const auto cursor = map.read_native_word(address("BOSS_PTR"));
+             const auto countdown = map.read_native_word(address("DEMOCNT"));
+             if (game->boss_roll_active()) {
++                const auto wipe = game->window_wipe_state();
++                boss_round_wipe_seen |= wipe.active
++                    && std::any_of(wipe.left.begin(), wipe.left.end(),
++                        [](std::uint16_t x) { return x > 0U && x < 128U; });
+                 boss_text_typed |= map.read_native_word(address("SEQ_TPTR")) > 20;
+                 if (cursor == 2 && countdown == 100) {
+                     const auto& palette = map.ppu_state().cgram;
+@@ -279,7 +300,8 @@
+     require(next_stage_card == 8, "not all seven stage cards were presented");
+     require(average_tick - total_tick == 50, "total/average timing differs from MAIN.ASM's two 25-transfer waits");
+     require(seen_bosses.size() == bosses.size(), "defeated bosses missing from roll");
+-    require(boss_text_typed && boss_palette_checked, "boss presentation checks never exercised");
++    require(boss_text_typed && boss_palette_checked && boss_round_wipe_seen,
++        "boss presentation or round window wipe was skipped");
+     for (unsigned i = 0; i + 1 < bosses.size(); ++i) {
+         require(boss_first_tick[i + 1] - boss_first_tick[i] == boss_initial_count[i] + 38,
+             std::string{"boss display/wipe timing mismatch: "} + bosses[i] + " got "
+@@ -307,6 +329,74 @@
+         require(game->flow_state() == GameFlowState::intro,
+             "Start after THE END did not hand off to the front end");
+         require(!game->final_score_active(), "credits score state survived restart");
++        // #68: reaching the front end is insufficient; stale ending scroll
++        // state can turn title graphics into repeated tile fragments.
++        for (unsigned tick=0; tick<120 && game->flow_state()!=GameFlowState::title; ++tick) {
++            static_cast<void>(game->tick({starfox::input::start,0U,0U}));
++        }
++        require(game->flow_state()==GameFlowState::title,
++            "restarted intro did not reach the title");
++        auto fresh_title=std::make_unique<GameSimulation>(rom,symbols,"TITLEMAP");
++        fresh_title->set_timing_mode(game->timing_mode());
++        fresh_title->set_presentation_fps(20U);
++        for(unsigned tick=0;tick<200;++tick) {
++            static_cast<void>(game->tick({}));
++            static_cast<void>(fresh_title->tick({}));
++        }
++        const auto& restarted_ppu=map.ppu_state();
++        const auto& fresh_ppu=fresh_title->map().ppu_state();
++        require(restarted_ppu.bg2_scroll_y==fresh_ppu.bg2_scroll_y,
++            "ending restart retained a different title BG2 scroll: "
++                +std::to_string(restarted_ppu.bg2_scroll_y)+" vs "
++                +std::to_string(fresh_ppu.bg2_scroll_y));
++        require(restarted_ppu.bg2_scanline_scroll_enabled==fresh_ppu.bg2_scanline_scroll_enabled,
++            "ending scanline scroll leaked into title");
++        // #67 is specifically Space Armada after an ending, not Colony.
++        // Launch both histories through the same public level-select path and
++        // require that the authored Armada route actually enters a tunnel.
++        for(auto* replay:{game.get(),fresh_title.get()}) {
++            replay->set_god_mode(true);
++            replay->set_selected_level(13);
++            require(replay->launch_selected_level(),"Armada replay launch failed");
++        }
++        unsigned tunnel_samples{};
++        for(unsigned tick=0;tick<5000;++tick) {
++            const starfox::input::ButtonMask boost=tick%100<40?starfox::input::x:0;
++            static_cast<void>(game->tick({boost,static_cast<starfox::input::ButtonMask>(tick%100==0?boost:0),0}));
++            static_cast<void>(fresh_title->tick({boost,static_cast<starfox::input::ButtonMask>(tick%100==0?boost:0),0}));
++            const bool tunnel=map.read_native_byte(address("INATUNNEL"))!=0;
++            const bool fresh_tunnel=fresh_title->map().read_native_byte(address("INATUNNEL"))!=0;
++            require(tunnel==fresh_tunnel,"ending history changed Armada tunnel entry");
++            if(!tunnel) continue;
++            ++tunnel_samples;
++            const auto& replay_bg=map.ppu_state();
++            const auto& clean_bg=fresh_title->map().ppu_state();
++            require(map.background_scroll_override()==fresh_title->map().background_scroll_override(),
++                "ending scroll override leaked into Armada tunnel");
++            require(replay_bg.bg2_scroll_x==clean_bg.bg2_scroll_x
++                && replay_bg.bg2_scroll_y==clean_bg.bg2_scroll_y
++                && replay_bg.bg2_horizontal_offsets_enabled==clean_bg.bg2_horizontal_offsets_enabled
++                && replay_bg.bg2_horizontal_offsets==clean_bg.bg2_horizontal_offsets
++                && replay_bg.bg2_scanline_scroll_enabled==clean_bg.bg2_scanline_scroll_enabled
++                && replay_bg.bg2_scanline_scroll_y==clean_bg.bg2_scanline_scroll_y,
++                "post-ending Armada tunnel scroll differs from clean launch at tick "+std::to_string(tick));
++            if(tunnel_samples==1 || tunnel_samples==60 || tunnel_samples==120) {
++                for(const auto width:{256U,400U,800U}) {
++                    starfox::render::Framebuffer replay_image(width,224),clean_image(width,224);
++                    starfox::render::BackgroundRenderer renderer;
++                    const auto origin=static_cast<std::int32_t>((width-256)/2);
++                    renderer.draw_bg2(replay_bg,replay_bg.bg2_scroll_x,replay_bg.bg2_scroll_y,
++                        replay_image,starfox::render::TilePriorityPass::all,origin);
++                    renderer.draw_bg2(clean_bg,clean_bg.bg2_scroll_x,clean_bg.bg2_scroll_y,
++                        clean_image,starfox::render::TilePriorityPass::all,origin);
++                    require(std::equal(replay_image.pixels().begin(),replay_image.pixels().end(),clean_image.pixels().begin()),
++                        "ending history changed Armada background pixels at width "+std::to_string(width));
++                }
++            }
++            if(tunnel_samples==120) break;
++        }
++        require(tunnel_samples==120,"Armada replay fixture did not cover 120 tunnel ticks");
++        std::cout<<"Post-ending Armada: 120 tunnel scroll samples match clean launch\n";
+     }
+     std::cout << (ex ? "EX" : "Original") << (original_pace ? " original/20Hz" : " unlocked/20Hz")
+         << (special_route ? " special-route" : " route-1") << ": escape=" << ending_start
+@@ -317,8 +407,13 @@
+ }
+
+ int main(int argc, char** argv) {
+-    if (argc != 3) return 2;
++    if (argc != 3 && argc != 2) return 2;
+     try {
++        check_painter_order();
++        if(argc==2) {
++            require(std::string_view(argv[1])=="--painter-order-only","Unknown ending test option");
++            return 0;
++        }
+         const auto rom = starfox::assets::RomImage::load(argv[1]);
+         const auto symbols = starfox::assets::SymbolMap::load(argv[2]);
+         check_ending_irq(rom, symbols);
+diff --git a/tests/credits_restart_tests.cpp b/tests/credits_restart_tests.cpp
+new file mode 100644
+--- /dev/null
++++ b/tests/credits_restart_tests.cpp
+@@ -0,0 +1,45 @@
++#include "starfox/assets/rom.hpp"
++#include "starfox/input/buttons.hpp"
++#include "starfox/simulation/game_simulation.hpp"
++#include <iostream>
++#include <memory>
++#include <stdexcept>
++
++int main(int argc,char** argv) try {
++    if(argc!=3) {std::cerr<<"Usage: credits_restart_tests ROM SYMBOLS\n";return 2;}
++    const auto rom=starfox::assets::RomImage::load(argv[1]);
++    const auto symbols=starfox::assets::SymbolMap::load(argv[2]);
++    auto game=std::make_unique<starfox::simulation::GameSimulation>(rom,symbols,"CREDITSMAP");
++    game->set_timing_mode(starfox::simulation::TimingMode::unlocked_20_fps);
++    using Flow=starfox::simulation::GameFlowState;
++    const bool extended=!symbols.find("SPECWEPCNTONE").empty();
++    for(unsigned tick=0;tick<20000;++tick) {
++        // Repeated/held Start covers the exact transfer in which THE END
++        // finishes its wait, not only a host flag set manually in a fixture.
++        for(unsigned phase=0;phase<3;++phase) game->present_frame();
++        (void)game->tick({starfox::input::start,starfox::input::start,0});
++        const auto flow=game->flow_state();
++        if(flow==Flow::credits || flow==Flow::finished) continue;
++        if(flow!=(extended?Flow::ex_pregame_menu:Flow::intro))
++            throw std::runtime_error("Credits Start entered a corrupt/wrong frontend");
++        if(!extended && game->map().read_native_byte(symbols.find("BG2VOFSOVERRIDE").front())!=0)
++            throw std::runtime_error("Credits restart retained its background override");
++        // Exercise the returned frontend too, including another source tick.
++        (void)game->tick({});
++        if(!extended) {
++            bool playable=false;
++            for(unsigned step=0;step<5000 && !playable;++step) {
++                starfox::input::ButtonMask held=starfox::input::start;
++                const auto next=game->flow_state();
++                if(next==Flow::controls_choice) held=starfox::input::down|starfox::input::a;
++                else if(next==Flow::planet_select || next==Flow::planet_travel) held=starfox::input::a;
++                for(unsigned phase=0;phase<3;++phase) game->present_frame();
++                (void)game->tick({held,held,0});
++                playable=game->flow_state()==Flow::gameplay && game->objects().is_active(game->player());
++            }
++            if(!playable) throw std::runtime_error("Post-credits frontend could not launch a new playable game");
++        }
++        std::cout<<"Credits Start returned safely after "<<tick+1<<" source ticks\n";return 0;
++    }
++    throw std::runtime_error("Credits restart did not finish in bounded source time");
++} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1097,6 +1097,9 @@
+
+     add_executable(starfox_ending_tests tests/ending_tests.cpp)
+     target_link_libraries(starfox_ending_tests PRIVATE starfox_core)
++    add_test(NAME starfox_ending_painter_order COMMAND starfox_ending_tests --painter-order-only)
++    add_executable(starfox_credits_restart_tests tests/credits_restart_tests.cpp)
++    target_link_libraries(starfox_credits_restart_tests PRIVATE starfox_core)
+     add_executable(starfox_intro_pacing_tests tests/intro_pacing_tests.cpp)
+     add_executable(starfox_geometry_pacing_tests tests/geometry_pacing_tests.cpp)
+     target_link_libraries(starfox_geometry_pacing_tests PRIVATE starfox_core)

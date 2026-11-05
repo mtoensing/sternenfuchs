@@ -139,6 +139,7 @@ cp "$ROOT/portmaster/sternenfuchs/cover.png" "$DIST/cover.png"
 # resolves correctly once installed, not just at the zip's top level.
 cp "$ROOT/portmaster/sternenfuchs/screenshot.png" "$DIST/sternenfuchs/screenshot.png"
 cp "$ROOT/portmaster/sternenfuchs/prototype-pregame.cfg" "$DIST/sternenfuchs/prototype-pregame.cfg"
+cp "$ROOT/portmaster/sternenfuchs/your rom here.txt" "$DIST/sternenfuchs/your rom here.txt"
 cp -r "$ROOT/portmaster/sternenfuchs/licenses" "$DIST/sternenfuchs/licenses"
 
 file "$DIST/sternenfuchs/starfox.aarch64"
